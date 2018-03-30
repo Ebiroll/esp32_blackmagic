@@ -42,6 +42,12 @@
 
 static int gdb_if_serv, gdb_if_conn;
 
+void set_gdb_socket(int socket) 
+{
+	gdb_if_conn=socket;
+}
+
+
 int gdb_if_init(void)
 {
 #ifdef WIN32

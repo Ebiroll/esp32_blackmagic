@@ -70,7 +70,7 @@ static const char *TAG = "blackmagic";
 
 
 // extern 
-//void set_gdb_socket(int socket);
+void set_gdb_socket(int socket);
 
 
 static esp_err_t event_handler(void *ctx, system_event_t *event)
@@ -121,9 +121,6 @@ void gdb_application_thread(void *pvParameters)
 	struct sockaddr_in address, remote;
 	int size;
 
-	xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
-						false, true, portMAX_DELAY);
-	ESP_LOGI(TAG, "Connected to AP");
 
 
 	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -143,21 +140,34 @@ void gdb_application_thread(void *pvParameters)
 	while (1) {
 		if ((new_sd = accept(sock, (struct sockaddr *)&remote, (socklen_t *)&size)) > 0) {
 			    printf("accepted new gdb connection\n");
-                //set_gdb_socket(new_sd);
+                set_gdb_socket(new_sd);
                 gdb_main();
 	        }
 	}
 }
 
+void main_task(void *parameters);
+
 
 void app_main()
 {
-	platform_init();
 
     ESP_ERROR_CHECK( nvs_flash_init() );
 
     initialise_wifi();
+
+
+	xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
+						false, true, portMAX_DELAY);
+	ESP_LOGI(TAG, "Connected to AP");
+
+	platform_init();
+
     xTaskCreate(&gdb_application_thread, "gdb_thread", 4*4096, NULL, 17, NULL);
+
+
+   //xTaskCreate(&main_task, "main_task", 4*4096, NULL, 17, NULL);
+
 
 #if 0
 	while (true) {

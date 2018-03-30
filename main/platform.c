@@ -83,7 +83,8 @@ void platform_init()
 
 	pins_init();
 
-	assert(gdb_if_init() == 0);
+	//assert(gdb_if_init() == 0);
+	//gdb_if_init();
 }
 
 void platform_srst_set_val(bool assert)
