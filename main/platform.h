@@ -56,7 +56,7 @@
 #define SWCLK_PORT  0
 
 #define SWDIO_PIN (17)
-#define SWCLK_PIN (3)
+#define SWCLK_PIN (22)
 
 #define gpio_set_val(port, pin, value) do {	\
 		gpio_set_level(pin, value);		\
