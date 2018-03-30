@@ -147,6 +147,8 @@ bool cmd_help(target *t)
 
 static bool cmd_jtag_scan(target *t, int argc, char **argv)
 {
+	#if 0
+	// TODO, link with libopencm3 and set up JTAG PINS?
 	(void)t;
 	uint8_t irlens[argc];
 
@@ -183,6 +185,8 @@ static bool cmd_jtag_scan(target *t, int argc, char **argv)
 	}
 	cmd_targets();
 	morse(NULL, false);
+	#endif
+
 	return true;
 }
 

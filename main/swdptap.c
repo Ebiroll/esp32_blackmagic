@@ -18,80 +18,63 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* Quick hack for bit-banging SW-DP interface over FT2232.
- * Intended as proof of concept, not for production.
- */
-
-#include <stdio.h>
-#include <assert.h>
-//#include <ftdi.h>
+/* This file implements the low-level SW-DP interface. */
 
 #include "general.h"
 #include "swdptap.h"
-#if 0
-
-static uint8_t olddir = 0;
 
 int swdptap_init(void)
 {
-	int err;
-
-	assert(ftdic != NULL);
-
-	if((err = ftdi_set_bitmode(ftdic, 0xAB, BITMODE_BITBANG)) != 0) {
-		fprintf(stderr, "ftdi_set_bitmode: %d: %s\n",
-			err, ftdi_get_error_string(ftdic));
-		abort();
-	}
-
-	assert(ftdi_write_data(ftdic, (void*)"\xAB\xA8", 2) == 2);
-	olddir = 0;
-
 	return 0;
 }
 
 static void swdptap_turnaround(uint8_t dir)
 {
-	platform_buffer_flush();
+	static uint8_t olddir = 0;
 
-	if (dir == olddir)
-		return;
+	/* Don't turnaround if direction not changing */
+	if(dir == olddir) return;
 	olddir = dir;
 
-	if(dir)	/* SWDIO goes to input */
-		assert(ftdi_set_bitmode(ftdic, 0xA3, BITMODE_BITBANG) == 0);
+#ifdef DEBUG_SWD_BITS
+	DEBUG("%s", dir ? "\n-> ":"\n<- ");
+#endif
 
-	/* One clock cycle */
-	ftdi_write_data(ftdic, (void *)"\xAB\xA8", 2);
-
-	if(!dir) /* SWDIO goes to output */
-		assert(ftdi_set_bitmode(ftdic, 0xAB, BITMODE_BITBANG) == 0);
+	if(dir)
+		SWDIO_MODE_FLOAT();
+	gpio_set(SWCLK_PORT, SWCLK_PIN);
+	gpio_clear(SWCLK_PORT, SWCLK_PIN);
+	if(!dir)
+		SWDIO_MODE_DRIVE();
 }
 
 bool swdptap_bit_in(void)
 {
-	uint8_t ret;
+	uint16_t ret;
 
 	swdptap_turnaround(1);
 
-	ftdi_read_pins(ftdic, &ret);
-	ret &= 0x08;
-	ftdi_write_data(ftdic, (void *)"\xA1\xA0", 2);
+	ret = gpio_get(SWDIO_PORT, SWDIO_PIN);
+	gpio_set(SWCLK_PORT, SWCLK_PIN);
+	gpio_clear(SWCLK_PORT, SWCLK_PIN);
 
-	return ret;
+#ifdef DEBUG_SWD_BITS
+	DEBUG("%d", ret?1:0);
+#endif
+
+	return ret != 0;
 }
 
 void swdptap_bit_out(bool val)
 {
-	uint8_t buf[3] = "\xA0\xA1\xA0";
+#ifdef DEBUG_SWD_BITS
+	DEBUG("%d", val);
+#endif
 
 	swdptap_turnaround(0);
 
-	if (val) {
-		for(int i = 0; i < 3; i++)
-			buf[i] |= 0x08;
-	}
-	platform_buffer_write(buf, 3);
+	gpio_set_val(SWDIO_PORT, SWDIO_PIN, val);
+	gpio_set(SWCLK_PORT, SWCLK_PIN);
+	gpio_clear(SWCLK_PORT, SWCLK_PIN);
 }
 
-#endif
