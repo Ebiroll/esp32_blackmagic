@@ -47,6 +47,11 @@ void set_gdb_socket(int socket)
 	gdb_if_conn=socket;
 }
 
+void set_gdb_listen(int socket) 
+{
+	gdb_if_serv=socket;
+}
+
 
 int gdb_if_init(void)
 {

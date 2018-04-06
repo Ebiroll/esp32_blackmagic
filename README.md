@@ -41,3 +41,16 @@ https://github.com/blacksphere/blackmagic/wiki/Frequently-Asked-Questions
 ```
 
 Works like charm.
+
+# Quicker download
+```
+arm-none-eabi-gdb .pioenvs/rak811/firmware.elf -ex 'target  extended-remote 192.168.1.136:2345'
+
+(gdb) monitor swdp_scan
+(gdb) attach 1
+(gdb) load
+(gdb) b main
+(gdb) c
+
+
+```

@@ -71,6 +71,7 @@ static const char *TAG = "blackmagic";
 
 // extern 
 void set_gdb_socket(int socket);
+void set_gdb_listen(int socket);
 
 
 static esp_err_t event_handler(void *ctx, system_event_t *event)
@@ -134,6 +135,7 @@ void gdb_application_thread(void *pvParameters)
 		return;
 
 	listen(sock, 0);
+    set_gdb_listen(sock);
 
 	size = sizeof(remote);
 
