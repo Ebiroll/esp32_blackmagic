@@ -22,8 +22,8 @@
 #define __GDB_IF_H
 
 #if !defined(LIBFTDI)
-#include <libopencm3/usb/usbd.h>
-void gdb_usb_out_cb(usbd_device *dev, uint8_t ep);
+//#include <libopencm3/usb/usbd.h>
+//void gdb_usb_out_cb(usbd_device *dev, uint8_t ep);
 #endif
 
 int gdb_if_init(void);
