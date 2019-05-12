@@ -18,6 +18,8 @@ GND on ESP32 connects to GND on the RAK board, opposite to the boot pins
 PIN 22 on ESP32 connects to SWD_CLK
 PIN 17 on ESP32 connects to SWD_TMS
 ```
+Pins are changed in platform.h
+
 
 
 # Start the debugger,
