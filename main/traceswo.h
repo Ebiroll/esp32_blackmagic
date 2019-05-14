@@ -20,9 +20,9 @@
 #ifndef __TRACESWO_H
 #define __TRACESWO_H
 
-#include <libopencm3/usb/usbd.h>
+//#include <libopencm3/usb/usbd.h>
 
-void traceswo_init(void);
-void trace_buf_drain(usbd_device *dev, uint8_t ep);
+void traceswo_init(int baudrate);
+//void trace_buf_drain(usbd_device *dev, uint8_t ep);
 
 #endif
