@@ -111,7 +111,8 @@ static void routeTask(void *inpar) {
   ESP_LOGI(TAG, "Setting UART configuration number %d...", uart_num);
   ESP_ERROR_CHECK( uart_param_config(uart_num, &uart_config));
   QueueHandle_t uart_queue;
-  ESP_ERROR_CHECK( uart_set_pin(uart_num, -1, TRACESWO_PIN, -1, -1));
+
+  ESP_ERROR_CHECK( uart_set_pin(uart_num, TRACESWO_DUMMY_TX, TRACESWO_PIN, -1, -1));
   ESP_ERROR_CHECK( uart_driver_install(uart_num, 512 * 2, 512 * 2, 10,  &uart_queue,0));
   data = (uint8_t*) malloc(BUF_SIZE);
 
@@ -121,15 +122,21 @@ static void routeTask(void *inpar) {
   while(1) {
       //uint32_t bd=uart_baud_detect(1);
       //printf("baud %d\n",bd);
-      size = uart_read_bytes(uart_num, (unsigned char *)data, 2, portMAX_DELAY);
+      size = uart_read_bytes(uart_num, (unsigned char *)data, 3, 100);
+
+      // TODO, read channel or whatever is in data[0] & data[1] 
       if (size == 1) {
-            printf("%c\n",data[0]);
+            //printf("%c\n",data[0]);
+            printf("1 bytes received %d\n",data[0]);
       }
       if (size == 2) {
-            printf("%c%c\n",data[0],data[1]);
+            //printf("%c%c\n",data[0],data[1]);
+            printf("2 bytes received %d\n",data[0]);
       }
-
-      //vTaskDelay(10000);
+      if (size == 3) {
+            printf("%c",data[2]);
+            //printf("3\n");
+      }
   }
 }
 

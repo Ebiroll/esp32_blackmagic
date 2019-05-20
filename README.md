@@ -16,10 +16,15 @@ So
 ```
 GND on ESP32 connects to GND on the RAK board, opposite to the boot pins
 PIN 22 on ESP32 connects to SWD_CLK
+NOTE CHANGED TO 23 HERE!!!
 PIN 17 on ESP32 connects to SWD_TMS
 ```
 Pins are changed in platform.h
 
+I (3119) event: sta ip: 192.168.1.117, mask: 255.255.255.0, gw: 192.168.1.1
+I (3119) blackmagic: Connected to AP
+I (3119) gpio: GPIO[17]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
+I (3129) gpio: GPIO[23]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
 
 
 # Start the debugger,
@@ -43,6 +48,34 @@ https://github.com/blacksphere/blackmagic/wiki/Frequently-Asked-Questions
 ```
 
 Works like charm.
+
+# Trace SWO
+It is possible to use trace swo if you configure it to use UART mode and 115200.
+You must also define thses in platform.h.
+
+```
+#define PLATFORM_HAS_TRACESWO 1
+#define TRACESWO_PIN 13
+// Workaround for driver
+#define TRACESWO_DUMMY_TX 19
+```
+    
+Note that the debugger needs to be attached in order to get output on the serial device.
+Here is an example of how to set up the swo for UART mode trace,
+https://github.com/Ebiroll/beer_tracker/blob/master/RAK811-Tracker/src/swo.c
+Add this,
+```
+   SWO_Init(0x1, CPU_CORE_FREQUENCY_HZ);
+```
+
+Here are some more useful information ow what is possible.
+https://github.com/orbcode/orbuculum
+
+To start trace thead, do
+```
+(gdb) monitor traceswo
+```
+
 
 # Quicker download
 ```
