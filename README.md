@@ -16,15 +16,16 @@ So
 ```
 GND on ESP32 connects to GND on the RAK board, opposite to the boot pins
 PIN 22 on ESP32 connects to SWD_CLK
-NOTE CHANGED TO 23 HERE!!!
 PIN 17 on ESP32 connects to SWD_TMS
 ```
 Pins are changed in platform.h
 
+```
 I (3119) event: sta ip: 192.168.1.117, mask: 255.255.255.0, gw: 192.168.1.1
 I (3119) blackmagic: Connected to AP
 I (3119) gpio: GPIO[17]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
-I (3129) gpio: GPIO[23]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
+I (3129) gpio: GPIO[22]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
+```
 
 
 # Start the debugger,
