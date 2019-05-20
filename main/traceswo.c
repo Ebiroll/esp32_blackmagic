@@ -34,6 +34,7 @@
 #include "platform.h"
 #include "driver/uart.h"
 
+#ifdef PLATFORM_HAS_TRACESWO
 
 static const char *TAG = "traceswo";
 
@@ -151,6 +152,8 @@ void traceswo_init(int baudrate) {
     xTaskCreate(&routeTask, "swo_thread", 4*4096, NULL, 8, NULL);
 
 }
+
+#endif
 
 //void trace_buf_drain(usbd_device *dev, uint8_t ep);
 
