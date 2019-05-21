@@ -33,6 +33,8 @@
 #include <sys/time.h>
 #include "platform.h"
 #include "driver/uart.h"
+#include "soc/timer_group_struct.h"
+#include "soc/timer_group_reg.h"
 
 #ifdef PLATFORM_HAS_TRACESWO
 
@@ -123,7 +125,7 @@ static void routeTask(void *inpar) {
   while(1) {
       //uint32_t bd=uart_baud_detect(1);
       //printf("baud %d\n",bd);
-      size = uart_read_bytes(uart_num, (unsigned char *)data, 3, 100);
+      size = uart_read_bytes(uart_num, (unsigned char *)data, 3, 10 / portTICK_PERIOD_MS);
 
       // TODO, read channel or whatever is in data[0] & data[1] 
       if (size == 1) {
@@ -138,6 +140,10 @@ static void routeTask(void *inpar) {
             printf("%c",data[2]);
             //printf("3\n");
       }
+      // Keep watchdog happy
+      TIMERG0.wdt_wprotect=TIMG_WDT_WKEY_VALUE;
+      TIMERG0.wdt_feed=1;
+      TIMERG0.wdt_wprotect=0;
   }
 }
 
