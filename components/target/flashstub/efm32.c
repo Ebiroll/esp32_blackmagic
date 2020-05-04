@@ -42,8 +42,8 @@
 #define EFM32_MSC_STATUS_WDATAREADY     (1<<3)
 #define EFM32_MSC_STATUS_WORDTIMEOUT	(1<<4)
 
-void __attribute__((naked))
-efm32_flash_write_stub(uint32_t *dest, uint32_t *src, uint32_t size)
+//void __attribute__((naked))
+void efm32_flash_write_stub(uint32_t *dest, uint32_t *src, uint32_t size)
 {
 	uint32_t i;
 

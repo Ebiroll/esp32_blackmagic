@@ -11,6 +11,7 @@ This repository is not updated with latest changes in BMP
 This other repository contains the latest version of BMP source https://github.com/Ebiroll/blackmagic
 
 In order to build this repository in linux, do.
+```
       > . ~/esp/esp-idf/setup.sh
       > cd src/platforms/esp32
       #Check the platform.h files amd make sure that the pins are OK.
@@ -18,6 +19,7 @@ In order to build this repository in linux, do.
       #Run build script.
       > build-esp32.sh
       #Upload the
+```
 
 
 

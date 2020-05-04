@@ -32,8 +32,8 @@
 #define FLASH_CR_ERRIE		(1 << 25)
 #define FLASH_SR_EOP		(1 << 0)
 
-void __attribute__((naked))
-stm32l4_flash_write_stub(uint32_t *dest, uint32_t *src, uint32_t size)
+//void __attribute__((naked))
+void stm32l4_flash_write_stub(uint32_t *dest, uint32_t *src, uint32_t size)
 {
 	if ((size & 7) || ((uint32_t)dest & 7))
 		stub_exit(1);
@@ -41,7 +41,7 @@ stm32l4_flash_write_stub(uint32_t *dest, uint32_t *src, uint32_t size)
 		*FLASH_CR =  FLASH_CR_EOPIE | FLASH_CR_ERRIE | FLASH_CR_PG;
 		*dest++ = *src++;
 		*dest++ = *src++;
-		__asm("dsb");
+		//__asm("dsb");
 		while (*FLASH_SR & FLASH_SR_BSY)
 			;
 		if ((*FLASH_SR & SR_ERROR_MASK) || !(*FLASH_SR & FLASH_SR_EOP))

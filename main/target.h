@@ -26,7 +26,7 @@
 #define __TARGET_H
 
 #include <stdarg.h>
-
+#include <stdint.h>
 typedef struct target_s target;
 typedef uint32_t target_addr;
 struct target_controller;

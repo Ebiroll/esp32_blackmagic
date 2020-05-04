@@ -17,6 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#if 0
 #include "libopencm3/stm32/flash.h"
 #include "stub.h"
 
@@ -38,4 +39,4 @@ stm32f4_flash_write_x32_stub(uint32_t *dest, uint32_t *src, uint32_t size)
 
 	stub_exit(0);
 }
-
+#endif

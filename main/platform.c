@@ -31,7 +31,7 @@
 #include <assert.h>
 #include <sys/time.h>
 #include <sys/unistd.h>
-
+#include <esp_timer.h>
 //#include "esp/uart.h"
 
 //#include "FreeRTOS.h"
@@ -101,7 +101,9 @@ const char *platform_target_voltage(void)
 
 uint32_t platform_time_ms(void)
 {
-	return xTaskGetTickCount() / portTICK_PERIOD_MS;
+	//return xTaskGetTickCount() / portTICK_PERIOD_MS;
+	int64_t time_milli=esp_timer_get_time()/1000;
+	return((uint32_t)time_milli);
 }
 
 #define vTaskDelayMs(ms)	vTaskDelay((ms)/portTICK_PERIOD_MS)

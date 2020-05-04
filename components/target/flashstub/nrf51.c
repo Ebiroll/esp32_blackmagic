@@ -24,10 +24,10 @@
 #define NVMC           ((volatile uint32_t *)0x4001E000)
 #define NVMC_READY     NVMC[0x100]
 
-void __attribute__((naked))
-nrf51_flash_write_stub(volatile uint32_t *dest, uint32_t *src, uint32_t size)
+//void __attribute__((naked))
+void nrf51_flash_write_stub(volatile uint32_t *dest, uint32_t *src, uint32_t size)
 {
-	for (int i; i < size; i += 4) {
+	for (int i=0; i < size; i += 4) {
 		*dest++ = *src++;
 		while (!(NVMC_READY & 1))
 			;
