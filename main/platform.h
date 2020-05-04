@@ -33,30 +33,36 @@
 #define SET_IDLE_STATE(state)
 #define SET_ERROR_STATE(state)
 #define DEBUG(x, ...) do { ; } while (0)
+//#define DEBUG printf
 
 #include "timing.h"
 #include "driver/gpio.h"
-
-//#define LWIP_OPEN_SRC
-//#include <espressif/esp_common.h>
-//#include <esp8266.h>
 #include <freertos/FreeRTOS.h>
 
 #define TMS_SET_MODE() do { } while (0)
 
-// no-connects on ESP-01: 12,13,14,15
-#define TMS_PIN (17) // no-connects on ESP-01 OLAS, WAS 2
-#define TDI_PIN (13) // "
-#define TDO_PIN (14) // "
-#define TCK_PIN (3) // "
-// 2 is GPIO2, broken out
-// 3 is RXD
+#define TMS_PIN (17) // On wroover module, this is PSRAM clock
+#define TDI_PIN (13) // 
+#define TDO_PIN (14) // 
+#define TCK_PIN (12) // 
+/* These are used for input JTAG on esp32
+2 	MTDO / GPIO15 	TDO
+3 	MTDI / GPIO12 	TDI
+4 	MTCK / GPIO13 	TCK
+5 	MTMS / GPIO14 	TMS
+*/
 
-// ON ESP32 we dont have the PORTS, this is dummy value until code is corrected
+//#define PLATFORM_HAS_TRACESWO 1
+#define TRACESWO_PIN 13
+// Workaround for driver
+#define TRACESWO_DUMMY_TX 19
+
+// ON ESP32 we dont have the PORTS (unlike stm32), this is dummy value to keep things similar as other platforms
 #define SWCLK_PORT  0
+#define SWDIO_PORT  0
 
-#define SWDIO_PIN (17)
-#define SWCLK_PIN (22)
+#define SWDIO_PIN (17)  // On wroover module, this is PSRAM clock
+#define SWCLK_PIN (23)
 
 #define gpio_set_val(port, pin, value) do {	\
 		gpio_set_level(pin, value);		\
@@ -81,6 +87,6 @@
            gpio_set_direction(SWDIO_PIN, GPIO_MODE_OUTPUT);		\
 	} while (0)
 
-#define PLATFORM_HAS_DEBUG // do we?
-
+//#define PLATFORM_HAS_DEBUG 1
+//#define ENABLE_DEBUG 1
 #endif

@@ -47,7 +47,7 @@
 #define AP_SSID	 "blackmagic"
 #define AP_PSK	 "blackmagic"
 
-#define GPIO_OUTPUT_PIN_SEL  ((1<<SWCLK_PIN) | (1<<SWDIO_PIN))
+#define GPIO_OUTPUT_PIN_SEL  ((1<<SWCLK_PIN) | (1<<SWDIO_PIN) | (1<<TMS_PIN) | (1<<TDI_PIN) | (1<<TDO_PIN) | (1<<TCK_PIN))
 
 
 void pins_init() {
@@ -70,21 +70,8 @@ void pins_init() {
 void platform_init()
 {
 
-#if 0
-	gpio_set_iomux_function(3, IOMUX_GPIO3_FUNC_GPIO);
-	gpio_set_iomux_function(2, IOMUX_GPIO2_FUNC_GPIO);
-
-	gpio_clear(_, SWCLK_PIN);
-	gpio_clear(_, SWDIO_PIN);
-
-	gpio_enable(SWCLK_PIN, GPIO_OUTPUT);
-	gpio_enable(SWDIO_PIN, GPIO_OUTPUT);
-#endif	
-
 	pins_init();
 
-	//assert(gdb_if_init() == 0);
-	//gdb_if_init();
 }
 
 void platform_srst_set_val(bool assert)
