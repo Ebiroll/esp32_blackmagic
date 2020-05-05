@@ -35,7 +35,8 @@
 #include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
-#include "esp_event_loop.h"
+//#include "esp_event_loop.h"
+#include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 
@@ -46,7 +47,7 @@
 #include "lwip/dns.h"
 
 unsigned short gdb_port = 2345;
-
+#include "platform.h"
 
 /* The examples use simple WiFi configuration that you can set via
    'make menuconfig'.
@@ -56,6 +57,7 @@ unsigned short gdb_port = 2345;
 */
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
+
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t wifi_event_group;
@@ -185,6 +187,6 @@ void app_main()
 	}
 #endif
 	/* Should never get here */
-	return 0;
+	return ;
 }
 
