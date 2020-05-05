@@ -60,6 +60,11 @@ static const uint16_t lmi_flash_write_stub[] = {
 static void lmi_add_flash(target *t, size_t length)
 {
 	struct target_flash *f = calloc(1, sizeof(*f));
+	if (!f) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return;
+	}
+
 	f->start = 0;
 	f->length = length;
 	f->blocksize = 0x400;
@@ -95,11 +100,18 @@ bool lmi_probe(target *t)
 		lmi_add_flash(t, 0x10000);
 		t->target_options |= CORTEXM_TOPT_INHIBIT_SRST;
 		return true;
+
+	case 0x101F:    /* TM4C1294NCPDT */
+		t->driver = lmi_driver_str;
+		target_add_ram(t, 0x20000000, 0x40000);
+		lmi_add_flash(t, 0x100000);
+		t->target_options |= CORTEXM_TOPT_INHIBIT_SRST;
+		return true;
 	}
 	return false;
 }
 
-int lmi_flash_erase(struct target_flash *f, target_addr addr, size_t len)
+static int lmi_flash_erase(struct target_flash *f, target_addr addr, size_t len)
 {
 	target  *t = f->t;
 
@@ -114,14 +126,16 @@ int lmi_flash_erase(struct target_flash *f, target_addr addr, size_t len)
 
 		if (target_check_error(t))
 			return -1;
-
-		len -= BLOCK_SIZE;
+		if (len > BLOCK_SIZE)
+			len -= BLOCK_SIZE;
+		else
+			len = 0;
 		addr += BLOCK_SIZE;
 	}
 	return 0;
 }
 
-int lmi_flash_write(struct target_flash *f,
+static int lmi_flash_write(struct target_flash *f,
                     target_addr dest, const void *src, size_t len)
 {
 	target  *t = f->t;

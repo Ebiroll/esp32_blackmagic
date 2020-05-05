@@ -39,8 +39,8 @@
 #include "target_internal.h"
 #include "cortexm.h"
 
-static bool stm32f1_cmd_erase_mass(target *t);
-static bool stm32f1_cmd_option(target *t, int argc, char *argv[]);
+static bool stm32f1_cmd_erase_mass(target *t, int argc, const char **argv);
+static bool stm32f1_cmd_option(target *t, int argc, const char **argv);
 
 const struct command_s stm32f1_cmd_list[] = {
 	{"erase_mass", (cmd_handler)stm32f1_cmd_erase_mass, "Erase entire flash memory"},
@@ -72,6 +72,7 @@ static int stm32f1_flash_write(struct target_flash *f,
 #define FLASH_CR_OPTPG	(1 << 4)
 #define FLASH_CR_MER	(1 << 2)
 #define FLASH_CR_PER	(1 << 1)
+#define FLASH_CR_PG		(1 << 0)
 
 #define FLASH_OBR_RDPRT (1 << 1)
 
@@ -93,22 +94,21 @@ static int stm32f1_flash_write(struct target_flash *f,
 #define FLASHSIZE     0x1FFFF7E0
 #define FLASHSIZE_F0  0x1FFFF7CC
 
-static const uint16_t stm32f1_flash_write_stub[] = {
-#include "flashstub/stm32f1.stub"
-};
-
-#define SRAM_BASE 0x20000000
-#define STUB_BUFFER_BASE ALIGN(SRAM_BASE + sizeof(stm32f1_flash_write_stub), 4)
-
 static void stm32f1_add_flash(target *t,
                               uint32_t addr, size_t length, size_t erasesize)
 {
 	struct target_flash *f = calloc(1, sizeof(*f));
+	if (!f) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return;
+	}
+
 	f->start = addr;
 	f->length = length;
 	f->blocksize = erasesize;
 	f->erase = stm32f1_flash_erase;
 	f->write = stm32f1_flash_write;
+	f->buf_size = erasesize;
 	f->erased = 0xff;
 	target_add_flash(t, f);
 }
@@ -193,7 +193,6 @@ static int stm32f1_flash_erase(struct target_flash *f,
                                target_addr addr, size_t len)
 {
 	target *t = f->t;
-	uint16_t sr;
 
 	stm32f1_flash_unlock(t);
 
@@ -207,17 +206,23 @@ static int stm32f1_flash_erase(struct target_flash *f,
 
 		/* Read FLASH_SR to poll for BSY bit */
 		while (target_mem_read32(t, FLASH_SR) & FLASH_SR_BSY)
-			if(target_check_error(t))
+			if(target_check_error(t)) {
+				DEBUG("stm32f1 flash erase: comm error\n");
 				return -1;
-
-		len -= f->blocksize;
+			}
+		if (len > f->blocksize)
+			len -= f->blocksize;
+		else
+			len = 0;
 		addr += f->blocksize;
 	}
 
 	/* Check for error */
-	sr = target_mem_read32(t, FLASH_SR);
-	if ((sr & SR_ERROR_MASK) || !(sr & SR_EOP))
+	uint32_t sr = target_mem_read32(t, FLASH_SR);
+	if ((sr & SR_ERROR_MASK) || !(sr & SR_EOP)) {
+		DEBUG("stm32f1 flash erase error 0x%" PRIx32 "\n", sr);
 		return -1;
+	}
 
 	return 0;
 }
@@ -226,15 +231,30 @@ static int stm32f1_flash_write(struct target_flash *f,
                                target_addr dest, const void *src, size_t len)
 {
 	target *t = f->t;
-	/* Write stub and data to target ram and set PC */
-	target_mem_write(t, SRAM_BASE, stm32f1_flash_write_stub,
-	                 sizeof(stm32f1_flash_write_stub));
-	target_mem_write(t, STUB_BUFFER_BASE, src, len);
-	return cortexm_run_stub(t, SRAM_BASE, dest, STUB_BUFFER_BASE, len, 0);
+	uint32_t sr;
+	target_mem_write32(t, FLASH_CR, FLASH_CR_PG);
+	cortexm_mem_write_sized(t, dest, src, len, ALIGN_HALFWORD);
+	/* Read FLASH_SR to poll for BSY bit */
+	/* Wait for completion or an error */
+	do {
+		sr = target_mem_read32(t, FLASH_SR);
+		if(target_check_error(t)) {
+			DEBUG("stm32f1 flash write: comm error\n");
+			return -1;
+		}
+	} while (sr & FLASH_SR_BSY);
+
+	if (sr & SR_ERROR_MASK) {
+		DEBUG("stm32f1 flash write error 0x%" PRIx32 "\n", sr);
+			return -1;
+	}
+	return 0;
 }
 
-static bool stm32f1_cmd_erase_mass(target *t)
+static bool stm32f1_cmd_erase_mass(target *t, int argc, const char **argv)
 {
+	(void)argc;
+	(void)argv;
 	stm32f1_flash_unlock(t);
 
 	/* Flash mass erase start instruction */
@@ -310,7 +330,7 @@ static bool stm32f1_option_write(target *t, uint32_t addr, uint16_t value)
 	return true;
 }
 
-static bool stm32f1_cmd_option(target *t, int argc, char *argv[])
+static bool stm32f1_cmd_option(target *t, int argc, const char **argv)
 {
 	uint32_t addr, val;
 	uint32_t flash_obp_rdp_key;
@@ -322,6 +342,9 @@ static bool stm32f1_cmd_option(target *t, int argc, char *argv[])
 	case 0x438:  /* STM32F303x6/8 and STM32F328 */
 	case 0x440:  /* STM32F0 */
 	case 0x446:  /* STM32F303xD/E and STM32F398xE */
+	case 0x445:  /* STM32F04 RM0091 Rev.7, STM32F070x6 RM0360 Rev. 4*/
+	case 0x448:  /* STM32F07 RM0091 Rev.7, STM32F070xB RM0360 Rev. 4*/
+	case 0x442:  /* STM32F09 RM0091 Rev.7, STM32F030xC RM0360 Rev. 4*/
 		flash_obp_rdp_key = FLASH_OBP_RDP_KEY_F3;
 		break;
 	default: flash_obp_rdp_key = FLASH_OBP_RDP_KEY;

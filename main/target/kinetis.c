@@ -33,11 +33,13 @@
  * 		K64 Sub-Family Reference Manual, Rev. 2,
  */
 
+#include "command.h"
 #include "general.h"
 #include "target.h"
 #include "target_internal.h"
 
 #define SIM_SDID   0x40048024
+#define SIM_FCFG1  0x4004804C
 
 #define FTFA_BASE  0x40020000
 #define FTFA_FSTAT (FTFA_BASE + 0x00)
@@ -81,11 +83,12 @@ const struct command_s kinetis_cmd_list[] = {
 
 static bool kinetis_cmd_unsafe(target *t, int argc, char *argv[])
 {
-	if (argc == 1)
+	if (argc == 1) {
 		tc_printf(t, "Allow programming security byte: %s\n",
 			  unsafe_enabled ? "enabled" : "disabled");
-	else
-		unsafe_enabled = argv[1][0] == 'e';
+	} else {
+		parse_enable_or_disable(argv[1], &unsafe_enabled);
+	}
 	return true;
 }
 
@@ -103,7 +106,14 @@ static void kl_gen_add_flash(target *t, uint32_t addr, size_t length,
                              size_t erasesize, size_t write_len)
 {
 	struct kinetis_flash *kf = calloc(1, sizeof(*kf));
-	struct target_flash *f = &kf->f;
+	struct target_flash *f;
+
+	if (!kf) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return;
+	}
+
+	f = &kf->f;
 	f->start = addr;
 	f->length = length;
 	f->blocksize = erasesize;
@@ -118,7 +128,61 @@ static void kl_gen_add_flash(target *t, uint32_t addr, size_t length,
 bool kinetis_probe(target *t)
 {
 	uint32_t sdid = target_mem_read32(t, SIM_SDID);
+	uint32_t fcfg1 = target_mem_read32(t, SIM_FCFG1);
+
 	switch (sdid >> 20) {
+	case 0x161:
+		/* sram memory size */
+		switch((sdid >> 16) & 0x0f) {
+			case 0x03:/* 4 KB */
+				target_add_ram(t, 0x1ffffc00, 0x0400);
+				target_add_ram(t, 0x20000000, 0x0C00);
+				break;
+			case 0x04:/* 8 KB */
+				target_add_ram(t, 0x1ffff800, 0x0800);
+				target_add_ram(t, 0x20000000, 0x1800);
+				break;
+			case 0x05:/* 16 KB */
+				target_add_ram(t, 0x1ffff000, 0x1000);
+				target_add_ram(t, 0x20000000, 0x3000);
+				break;
+			case 0x06:/* 32 KB */
+				target_add_ram(t, 0x1fffe000, 0x2000);
+				target_add_ram(t, 0x20000000, 0x6000);
+				break;
+			default:
+				return false;
+				break;
+		}
+
+		/* flash memory size */
+		switch((fcfg1 >> 24) & 0x0f) {
+			case 0x03: /* 32 KB */
+				t->driver = "KL16Z32Vxxx";
+				kl_gen_add_flash(t, 0x00000000, 0x08000, 0x400, KL_WRITE_LEN);
+				break;
+
+			case 0x05: /* 64 KB */
+				t->driver = "KL16Z64Vxxx";
+				kl_gen_add_flash(t, 0x00000000, 0x10000, 0x400, KL_WRITE_LEN);
+				break;
+
+			case 0x07: /* 128 KB */
+				t->driver = "KL16Z128Vxxx";
+				kl_gen_add_flash(t, 0x00000000, 0x20000, 0x400, KL_WRITE_LEN);
+				break;
+
+			case 0x09: /* 256 KB */
+				t->driver = "KL16Z256Vxxx";
+				kl_gen_add_flash(t, 0x00000000, 0x40000, 0x400, KL_WRITE_LEN);
+				break;
+			default:
+				return false;
+				break;
+		}
+
+		break;
+
 	case 0x251:
 		t->driver = "KL25";
 		target_add_ram(t, 0x1ffff000, 0x1000);
@@ -246,7 +310,10 @@ static int kl_gen_flash_erase(struct target_flash *f, target_addr addr, size_t l
 	while (len) {
 		if (kl_gen_command(f->t, FTFA_CMD_ERASE_SECTOR, addr, NULL)) {
 			/* Different targets have different flash erase sizes */
-			len -= f->blocksize;
+			if (len > f->blocksize)
+				len -= f->blocksize;
+			else
+				len = 0;
 			addr += f->blocksize;
 		} else {
 			return 1;
@@ -281,7 +348,10 @@ static int kl_gen_flash_write(struct target_flash *f,
 
 	while (len) {
 		if (kl_gen_command(f->t, write_cmd, dest, src)) {
-			len -= kf->write_len;
+			if (len > kf->write_len)
+				len -= kf->write_len;
+			else
+				len = 0;
 			dest += kf->write_len;
 			src += kf->write_len;
 		} else {
@@ -334,17 +404,14 @@ static int kl_gen_flash_done(struct target_flash *f)
 #define KINETIS_MDM_IDR_K22F 0x1c0000
 #define KINETIS_MDM_IDR_KZ03 0x1c0020
 
-static bool kinetis_mdm_cmd_erase_mass(target *t);
+static bool kinetis_mdm_cmd_erase_mass(target *t, int argc, const char **argv);
+static bool kinetis_mdm_cmd_ke04_mode(target *t, int argc, const char **argv);
 
 const struct command_s kinetis_mdm_cmd_list[] = {
 	{"erase_mass", (cmd_handler)kinetis_mdm_cmd_erase_mass, "Erase entire flash memory"},
+	{"ke04_mode", (cmd_handler)kinetis_mdm_cmd_ke04_mode, "Allow erase for KE04"},
 	{NULL, NULL, NULL}
 };
-
-bool nop_function(void)
-{
-	return true;
-}
 
 enum target_halt_reason mdm_halt_poll(target *t, target_addr *watch)
 {
@@ -355,7 +422,7 @@ enum target_halt_reason mdm_halt_poll(target *t, target_addr *watch)
 void kinetis_mdm_probe(ADIv5_AP_t *ap)
 {
 	switch(ap->idr) {
-	case KINETIS_MDM_IDR_KZ03:
+	case KINETIS_MDM_IDR_KZ03: /* Also valid for KE04, no way to check! */
 	case KINETIS_MDM_IDR_K22F:
 		break;
 	default:
@@ -363,24 +430,16 @@ void kinetis_mdm_probe(ADIv5_AP_t *ap)
 	}
 
 	target *t = target_new();
+	if (!t) {
+		return;
+	}
+
 	adiv5_ap_ref(ap);
 	t->priv = ap;
 	t->priv_free = (void*)adiv5_ap_unref;
 
 	t->driver = "Kinetis Recovery (MDM-AP)";
-	t->attach = (void*)nop_function;
-	t->detach = (void*)nop_function;
-	t->check_error = (void*)nop_function;
-	t->mem_read = (void*)nop_function;
-	t->mem_write = (void*)nop_function;
 	t->regs_size = 4;
-	t->regs_read = (void*)nop_function;
-	t->regs_write = (void*)nop_function;
-	t->reset = (void*)nop_function;
-	t->halt_request = (void*)nop_function;
-	t->halt_poll = mdm_halt_poll;
-	t->halt_resume = (void*)nop_function;
-
 	target_add_commands(t, kinetis_mdm_cmd_list, t->driver);
 }
 
@@ -392,20 +451,43 @@ void kinetis_mdm_probe(ADIv5_AP_t *ap)
 #define MDM_STATUS_MASS_ERASE_ENABLED (1 << 5)
 
 #define MDM_CONTROL_MASS_ERASE (1 << 0)
+#define MDM_CONTROL_SYS_RESET  (1 << 3)
 
-static bool kinetis_mdm_cmd_erase_mass(target *t)
+/* This is needed as a separate command, as there's no way to  *
+ * tell a KE04 from other kinetis in kinetis_mdm_probe()       */
+static bool ke04_mode = false;
+static bool kinetis_mdm_cmd_ke04_mode(target *t, int argc, const char **argv)
 {
+	(void)argc;
+	(void)argv;
+	/* Set a flag to ignore part of the status and assert reset */
+	ke04_mode = true;
+	tc_printf(t, "Mass erase for KE04 now allowed\n");
+	return true;
+}
+static bool kinetis_mdm_cmd_erase_mass(target *t, int argc, const char **argv)
+{
+	(void)argc;
+	(void)argv;
 	ADIv5_AP_t *ap = t->priv;
+
+	/* Keep the MCU in reset as stated in KL25PxxM48SF0RM */
+	if(ke04_mode)
+		adiv5_ap_write(ap, MDM_CONTROL, MDM_CONTROL_SYS_RESET);
 
 	uint32_t status, control;
 	status = adiv5_ap_read(ap, MDM_STATUS);
 	control = adiv5_ap_read(ap, MDM_CONTROL);
 	tc_printf(t, "Requesting mass erase (status = 0x%"PRIx32")\n", status);
 
-	if (!(status & MDM_STATUS_MASS_ERASE_ENABLED)) {
+	/* This flag does not exist on KE04 */
+	if (!(status & MDM_STATUS_MASS_ERASE_ENABLED) && !ke04_mode) {
 		tc_printf(t, "ERROR: Mass erase disabled!\n");
 		return false;
 	}
+
+	/* Flag is not persistent */
+	ke04_mode = false;
 
 	if (!(status & MDM_STATUS_FLASH_READY)) {
 		tc_printf(t, "ERROR: Flash not ready!\n");

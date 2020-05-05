@@ -35,6 +35,26 @@
 #define LPC11XX_DEVICE_ID  0x400483F4
 #define LPC8XX_DEVICE_ID   0x400483F8
 
+static bool lpc11xx_read_uid(target *t, int argc, const char *argv[])
+{
+	(void)argc;
+	(void)argv;
+	struct lpc_flash *f = (struct lpc_flash *)t->flash;
+	uint8_t uid[16];
+	if (lpc_iap_call(f, uid, IAP_CMD_READUID))
+		return false;
+	tc_printf(t, "UID: 0x");
+	for (uint32_t i = 0; i < sizeof(uid); ++i)
+		tc_printf(t, "%02x", uid[i]);
+	tc_printf(t, "\n");
+	return true;
+}
+
+const struct command_s lpc11xx_cmd_list[] = {
+	{"readuid", lpc11xx_read_uid, "Read out the 16-byte UID."},
+	{NULL, NULL, NULL}
+};
+
 void lpc11xx_add_flash(target *t, uint32_t addr, size_t len, size_t erasesize)
 {
 	struct lpc_flash *lf = lpc_add_flash(t, addr, len);
@@ -52,6 +72,7 @@ lpc11xx_probe(target *t)
 	uint32_t idcode;
 
 	/* read the device ID register */
+	/* See UM10462 Rev. 5.5 Chapter 20.13.11 Table 377 */
 	idcode = target_mem_read32(t, LPC11XX_DEVICE_ID);
 	switch (idcode) {
 	case 0x041E502B:
@@ -73,7 +94,7 @@ lpc11xx_probe(target *t)
 	case 0x1440102B:	/* lpc1114 */
 	case 0x0A40902B:
 	case 0x1A40902B:
-	case 0x2058002B:	/* lpc1115 */
+	case 0x00050080:	/* lpc1115 and lpc1115L (not the XL version. See UM10398 Rev12.4 Chapter 3.1  ) */
 	case 0x1431102B:	/* lpc11c22 */
 	case 0x1430102B:	/* lpc11c24 */
 	case 0x095C802B:	/* lpc11u12x/201 */
@@ -88,6 +109,7 @@ lpc11xx_probe(target *t)
 		t->driver = "LPC11xx";
 		target_add_ram(t, 0x10000000, 0x2000);
 		lpc11xx_add_flash(t, 0x00000000, 0x20000, 0x1000);
+		target_add_commands(t, lpc11xx_cmd_list, "LPC11xx");
 		return true;
 
 	case 0x0A24902B:
@@ -96,8 +118,21 @@ lpc11xx_probe(target *t)
 		target_add_ram(t, 0x10000000, 0x1000);
 		lpc11xx_add_flash(t, 0x00000000, 0x10000, 0x1000);
 		return true;
+    case 0x1000002b: // FX LPC11U6 32 kB SRAM/256 kB flash (max)
+		t->driver = "LPC11U6";
+		target_add_ram(t, 0x10000000, 0x8000);
+		lpc11xx_add_flash(t, 0x00000000, 0x40000, 0x1000);
+		return true;
+	case 0x3000002B:
+	case 0x3D00002B:
+		t->driver = "LPC1343";
+		target_add_ram(t, 0x10000000, 0x2000);
+		lpc11xx_add_flash(t, 0x00000000, 0x8000, 0x1000);
+		return true;
 	}
-
+	if (idcode) {
+		DEBUG("LPC11xx: Unknown IDCODE 0x%08" PRIx32 "\n", idcode);
+	}
 	idcode = target_mem_read32(t, LPC8XX_DEVICE_ID);
 	switch (idcode) {
 	case 0x00008100:  /* LPC810M021FN8 */
@@ -108,16 +143,54 @@ lpc11xx_probe(target *t)
 		t->driver = "LPC81x";
 		target_add_ram(t, 0x10000000, 0x1000);
 		lpc11xx_add_flash(t, 0x00000000, 0x4000, 0x400);
+		target_add_commands(t, lpc11xx_cmd_list, "LPC81x");
 		return true;
-        case 0x00008221:  /* LPC822M101JHI33 */
-        case 0x00008222:  /* LPC822M101JDH20 */
-        case 0x00008241:  /* LPC824M201JHI33 */
-        case 0x00008242:  /* LPC824M201JDH20 */
+	case 0x00008221:  /* LPC822M101JHI33 */
+	case 0x00008222:  /* LPC822M101JDH20 */
+	case 0x00008241:  /* LPC824M201JHI33 */
+	case 0x00008242:  /* LPC824M201JDH20 */
 		t->driver = "LPC82x";
 		target_add_ram(t, 0x10000000, 0x2000);
 		lpc11xx_add_flash(t, 0x00000000, 0x8000, 0x400);
+		target_add_commands(t, lpc11xx_cmd_list, "LPC82x");
 		return true;
-
+	case 0x00008441:
+	case 0x00008442:
+	case 0x00008443: /* UM11029 Rev.1.4 list 8442 */
+	case 0x00008444:
+		t->driver = "LPC844";
+		target_add_ram(t, 0x10000000, 0x2000);
+		lpc11xx_add_flash(t, 0x00000000, 0x10000, 0x400);
+		return true;
+	case 0x00008451:
+	case 0x00008452:
+	case 0x00008453:
+	case 0x00008454:
+		t->driver = "LPC845";
+		target_add_ram(t, 0x10000000, 0x4000);
+		lpc11xx_add_flash(t, 0x00000000, 0x10000, 0x400);
+		return true;
+	case 0x0003D440:	/* LPC11U34/311  */
+	case 0x0001cc40:	/* LPC11U34/421  */
+	case 0x0001BC40:	/* LPC11U35/401  */
+	case 0x0000BC40:	/* LPC11U35/501  */
+	case 0x00019C40:	/* LPC11U36/401  */
+	case 0x00017C40:	/* LPC11U37FBD48/401  */
+	case 0x00007C44:	/* LPC11U37HFBD64/401  */
+	case 0x00007C40:	/* LPC11U37FBD64/501  */
+		t->driver = "LPC11U3x";
+		target_add_ram(t, 0x10000000, 0x2000);
+		lpc11xx_add_flash(t, 0x00000000, 0x20000, 0x1000);
+		return true;
+	case 0x00040070:	/* LPC1114/333 */
+	case 0x00050080:	/* lpc1115XL */
+		t->driver = "LPC1100XL";
+		target_add_ram(t, 0x10000000, 0x2000);
+		lpc11xx_add_flash(t, 0x00000000, 0x20000, 0x1000);
+		return true;
+	}
+	if (idcode) {
+		DEBUG("LPC8xx: Unknown IDCODE 0x%08" PRIx32 "\n", idcode);
 	}
 
 	return false;

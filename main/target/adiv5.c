@@ -18,8 +18,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* This file implements the transport generic functions of the
- * ARM Debug Interface v5 Architecure Specification, ARM doc IHI0031A.
+/* This file implements the transport generic functions.
+ * See the following ARM Reference Documents:
+ *
+ * ARM Debug Interface v5 Architecure Specification, ARM IHI 0031E
  */
 #include "general.h"
 #include "target.h"
@@ -27,10 +29,6 @@
 #include "adiv5.h"
 #include "cortexm.h"
 #include "exception.h"
-
-#ifndef DO_RESET_SEQ
-#define DO_RESET_SEQ 0
-#endif
 
 /* All this should probably be defined in a dedicated ADIV5 header, so that they
  * are consistently named and accessible when needed in the codebase.
@@ -171,6 +169,8 @@ static const struct {
 	{0x00b, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M0 BPU",  "(Breakpoint Unit)")},
 	{0x00c, aa_cortexm,   cidc_gipc,    PIDR_PN_BIT_STRINGS("Cortex-M4 SCS",  "(System Control Space)")},
 	{0x00d, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight ETM11", "(Embedded Trace)")},
+	{0x00e, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M7 FBP",  "(Flash Patch and Breakpoint)")},
+	{0x101, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("System TSGEN",   "(Time Stamp Generator)")},
 	{0x490, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A15 GIC", "(Generic Interrupt Controller)")},
 	{0x4c7, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M7 PPB",  "(Private Peripheral Bus ROM Table)")},
 	{0x906, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight CTI",  "(Cross Trigger)")},
@@ -188,14 +188,19 @@ static const struct {
 	{0x924, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M3 ETM",  "(Embedded Trace)")},
 	{0x925, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M4 ETM",  "(Embedded Trace)")},
 	{0x930, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-R4 ETM",  "(Embedded Trace)")},
+	{0x932, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight MTB-M0+",  "(Simple Execution Trace)")},
 	{0x941, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight TPIU-Lite", "(Trace Port Interface Unit)")},
 	{0x950, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight Component", "(unidentified Cortex-A9 component)")},
 	{0x955, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight Component", "(unidentified Cortex-A5 component)")},
+	{0x956, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A7 ETM",  "(Embedded Trace)")},
 	{0x95f, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A15 PTM", "(Program Trace Macrocell)")},
 	{0x961, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight TMC",  "(Trace Memory Controller)")},
 	{0x962, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight STM",  "(System Trace Macrocell)")},
+	{0x963, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight STM",  "(System Trace Macrocell)")},
+	{0x975, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M7 ETM",  "(Embedded Trace)")},
 	{0x9a0, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("CoreSight PMU",  "(Performance Monitoring Unit)")},
 	{0x9a1, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M4 TPIU", "(Trace Port Interface Unit)")},
+	{0x9a9, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M7 TPIU", "(Trace Port Interface Unit)")},
 	{0x9a5, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A5 ETM",  "(Embedded Trace)")},
 	{0x9a7, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A7 PMU",  "(Performance Monitor Unit)")},
 	{0x9af, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A15 PMU", "(Performance Monitor Unit)")},
@@ -205,12 +210,14 @@ static const struct {
 	{0xc09, aa_cortexa,   cidc_dc,      PIDR_PN_BIT_STRINGS("Cortex-A9 Debug", "(Debug Unit)")},
 	{0xc0f, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-A15 Debug", "(Debug Unit)")}, /* support? */
 	{0xc14, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-R4 Debug", "(Debug Unit)")}, /* support? */
+	{0xcd0, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Atmel DSU", "(Device Service Unit)")},
+	{0xd21, aa_nosupport, cidc_unknown, PIDR_PN_BIT_STRINGS("Cortex-M33", "()")}, /* support? */
 	{0xfff, aa_end,       cidc_unknown, PIDR_PN_BIT_STRINGS("end", "end")}
 };
 
 extern bool cortexa_probe(ADIv5_AP_t *apb, uint32_t debug_base);
 
-void adiv5_dp_ref(ADIv5_DP_t *dp)
+static void adiv5_dp_ref(ADIv5_DP_t *dp)
 {
 	dp->refcnt++;
 }
@@ -220,7 +227,7 @@ void adiv5_ap_ref(ADIv5_AP_t *ap)
 	ap->refcnt++;
 }
 
-void adiv5_dp_unref(ADIv5_DP_t *dp)
+static void adiv5_dp_unref(ADIv5_DP_t *dp)
 {
 	if (--(dp->refcnt) == 0)
 		free(dp);
@@ -246,66 +253,99 @@ static uint32_t adiv5_mem_read32(ADIv5_AP_t *ap, uint32_t addr)
 	return ret;
 }
 
-static void adiv5_component_probe(ADIv5_AP_t *ap, uint32_t addr)
+static uint32_t adiv5_ap_read_id(ADIv5_AP_t *ap, uint32_t addr)
 {
+	uint32_t res = 0;
+	for (int i = 0; i < 4; i++) {
+		uint32_t x = adiv5_mem_read32(ap, addr + 4 * i);
+		res |= (x & 0xff) << (i * 8);
+	}
+	return res;
+}
+
+uint64_t adiv5_ap_read_pidr(ADIv5_AP_t *ap, uint32_t addr)
+{
+	uint64_t pidr = adiv5_ap_read_id(ap, addr + PIDR4_OFFSET);
+	pidr = pidr << 32 |     adiv5_ap_read_id(ap, addr + PIDR0_OFFSET);
+	return pidr;
+}
+
+static bool adiv5_component_probe(ADIv5_AP_t *ap, uint32_t addr, int recursion, int num_entry)
+{
+	(void) num_entry;
 	addr &= ~3;
-	uint64_t pidr = 0;
-	uint32_t cidr = 0;
+	uint64_t pidr = adiv5_ap_read_pidr(ap, addr);
+	uint32_t cidr = adiv5_ap_read_id(ap, addr + CIDR0_OFFSET);
+	bool res = false;
+#if defined(ENABLE_DEBUG) && defined(PLATFORM_HAS_DEBUG)
+	char indent[recursion + 1];
 
-	/* Assemble logical Product ID register value. */
-	for (int i = 0; i < 4; i++) {
-		uint32_t x = adiv5_mem_read32(ap, addr + PIDR0_OFFSET + 4*i);
-		pidr |= (x & 0xff) << (i * 8);
-	}
-	{
-		uint32_t x = adiv5_mem_read32(ap, addr + PIDR4_OFFSET);
-		pidr |= (uint64_t)x << 32;
-	}
-
-	/* Assemble logical Component ID register value. */
-	for (int i = 0; i < 4; i++) {
-		uint32_t x = adiv5_mem_read32(ap, addr + CIDR0_OFFSET + 4*i);
-		cidr |= ((uint64_t)(x & 0xff)) << (i * 8);
-	}
+	for(int i = 0; i < recursion; i++) indent[i] = ' ';
+	indent[recursion] = 0;
+#endif
 
 	if (adiv5_dp_error(ap->dp)) {
-		DEBUG("Fault reading ID registers\n");
-		return;
+		DEBUG("%sFault reading ID registers\n", indent);
+		return false;
 	}
 
 	/* CIDR preamble sanity check */
 	if ((cidr & ~CID_CLASS_MASK) != CID_PREAMBLE) {
-		DEBUG("0x%"PRIx32": 0x%"PRIx32" <- does not match preamble (0x%X)\n",
-                      addr, cidr, CID_PREAMBLE);
-		return;
+		DEBUG("%s%d 0x%08" PRIx32": 0x%08" PRIx32
+			  " <- does not match preamble (0x%X)\n",
+			  indent + 1, num_entry, addr, cidr, CID_PREAMBLE);
+		return false;
 	}
 
 	/* Extract Component ID class nibble */
 	uint32_t cid_class = (cidr & CID_CLASS_MASK) >> CID_CLASS_SHIFT;
 
-	if (cid_class == cidc_romtab) { /* ROM table, probe recursively */
-		for (int i = 0; i < 256; i++) {
+	/* ROM table */
+	if (cid_class == cidc_romtab) {
+		/* Check SYSMEM bit */
+#if defined(ENABLE_DEBUG) && defined(PLATFORM_HAS_DEBUG)
+		uint32_t memtype = adiv5_mem_read32(ap, addr | ADIV5_ROM_MEMTYPE) &
+			ADIV5_ROM_MEMTYPE_SYSMEM;
+
+		if (adiv5_dp_error(ap->dp)) {
+			DEBUG("Fault reading ROM table entry\n");
+		}
+
+		DEBUG("ROM: Table BASE=0x%" PRIx32 " SYSMEM=0x%" PRIx32 ", PIDR 0x%02"
+			  PRIx32 "%08" PRIx32 "\n", addr, memtype, (uint32_t)(pidr >> 32),
+			  (uint32_t)pidr);
+#endif
+
+		for (int i = 0; i < 960; i++) {
 			uint32_t entry = adiv5_mem_read32(ap, addr + i*4);
 			if (adiv5_dp_error(ap->dp)) {
-				DEBUG("Fault reading ROM table entry\n");
+				DEBUG("%sFault reading ROM table entry\n", indent);
 			}
 
 			if (entry == 0)
 				break;
 
-			if ((entry & 1) == 0)
+			if (!(entry & ADIV5_ROM_ROMENTRY_PRESENT)) {
+				DEBUG("%s%d Entry 0x%" PRIx32 " -> Not present\n", indent,
+					  i, entry);
 				continue;
+			}
 
-			adiv5_component_probe(ap, addr + (entry & ~0xfff));
+			/* Probe recursively */
+			res |= adiv5_component_probe(
+				ap, addr + (entry & ADIV5_ROM_ROMENTRY_OFFSET),
+				recursion + 1, i);
 		}
+		DEBUG("%sROM: Table END\n", indent);
 	} else {
 		/* Check if the component was designed by ARM, we currently do not support,
 		 * any components by other designers.
 		 */
 		if ((pidr & ~(PIDR_REV_MASK | PIDR_PN_MASK)) != PIDR_ARM_BITS) {
-			DEBUG("0x%"PRIx32": 0x%"PRIx64" <- does not match ARM JEP-106\n",
-                              addr, pidr);
-			return;
+			DEBUG("%s0x%" PRIx32 ": 0x%02" PRIx32 "%08" PRIx32
+				  " <- does not match ARM JEP-106\n",
+				  indent, addr, (uint32_t)(pidr >> 32), (uint32_t)pidr);
+			return false;
 		}
 
 		/* Extract part number from the part id register. */
@@ -316,56 +356,69 @@ static void adiv5_component_probe(ADIv5_AP_t *ap, uint32_t addr)
 		int i;
 		for (i = 0; pidr_pn_bits[i].arch != aa_end; i++) {
 			if (pidr_pn_bits[i].part_number == part_number) {
-				DEBUG("0x%"PRIx32": %s - %s %s\n", addr,
-				      cidc_debug_strings[cid_class],
-				      pidr_pn_bits[i].type,
-				      pidr_pn_bits[i].full);
-				/* Perform sanity check, if we know what to expect as component ID
-				 * class.
+				DEBUG("%s%d 0x%" PRIx32 ": %s - %s %s (PIDR = 0x%02" PRIx32
+					  "%08" PRIx32 ")",
+					  indent + 1, num_entry, addr,
+					  cidc_debug_strings[cid_class],
+					  pidr_pn_bits[i].type, pidr_pn_bits[i].full,
+					  (uint32_t)(pidr >> 32), (uint32_t)pidr);
+				/* Perform sanity check, if we know what to expect as
+				 * component ID class.
 				 */
 				if ((pidr_pn_bits[i].cidc != cidc_unknown) &&
 				    (cid_class != pidr_pn_bits[i].cidc)) {
-					DEBUG("WARNING: \"%s\" !match expected \"%s\"\n",
+					DEBUG("%sWARNING: \"%s\" !match expected \"%s\"\n", indent + 1,
 					      cidc_debug_strings[cid_class],
 					      cidc_debug_strings[pidr_pn_bits[i].cidc]);
 				}
+				res = true;
 				switch (pidr_pn_bits[i].arch) {
 				case aa_cortexm:
-					DEBUG("-> cortexm_probe\n");
-					cortexm_probe(ap);
+					DEBUG("%s-> cortexm_probe\n", indent + 1);
+					cortexm_probe(ap, false);
 					break;
 				case aa_cortexa:
-					DEBUG("-> cortexa_probe\n");
+					DEBUG("\n -> cortexa_probe\n");
 					cortexa_probe(ap, addr);
 					break;
 				default:
+					DEBUG("\n");
 					break;
 				}
 				break;
 			}
 		}
 		if (pidr_pn_bits[i].arch == aa_end) {
-			DEBUG("0x%"PRIx32": %s - Unknown (PIDR = 0x%"PRIx64")\n", addr,
-			      cidc_debug_strings[cid_class], pidr);
+			DEBUG("%s0x%" PRIx32 ": %s - Unknown (PIDR = 0x%02" PRIx32
+				  "%08" PRIx32 ")\n",
+				  indent, addr, cidc_debug_strings[cid_class],
+				  (uint32_t)(pidr >> 32), (uint32_t)pidr);
 		}
 	}
+	return res;
 }
+bool adiv5_ap_setup(int i);
+void adiv5_ap_cleanup(int i);
 
 ADIv5_AP_t *adiv5_new_ap(ADIv5_DP_t *dp, uint8_t apsel)
 {
 	ADIv5_AP_t *ap, tmpap;
-
 	/* Assume valid and try to read IDR */
 	memset(&tmpap, 0, sizeof(tmpap));
 	tmpap.dp = dp;
 	tmpap.apsel = apsel;
 	tmpap.idr = adiv5_ap_read(&tmpap, ADIV5_AP_IDR);
+	tmpap.base = adiv5_ap_read(&tmpap, ADIV5_AP_BASE);
 
-	if(!tmpap.idr) /* IDR Invalid - Should we not continue here? */
+	if(!tmpap.idr) /* IDR Invalid */
 		return NULL;
-
 	/* It's valid to so create a heap copy */
 	ap = malloc(sizeof(*ap));
+	if (!ap) {			/* malloc failed: heap exhaustion */
+		DEBUG("malloc: failed in %s\n", __func__);
+		return NULL;
+	}
+
 	memcpy(ap, &tmpap, sizeof(*ap));
 	adiv5_dp_ref(dp);
 
@@ -379,17 +432,15 @@ ADIv5_AP_t *adiv5_new_ap(ADIv5_DP_t *dp, uint8_t apsel)
 		ap->csw &= ~ADIV5_AP_CSW_TRINPROG;
 	}
 
-	DEBUG(" AP %3d: IDR=%08"PRIx32" CFG=%08"PRIx32" BASE=%08"PRIx32" CSW=%08"PRIx32"\n",
+	DEBUG("AP %3d: IDR=%08"PRIx32" CFG=%08"PRIx32" BASE=%08"PRIx32" CSW=%08"PRIx32"\n",
 	      apsel, ap->idr, ap->cfg, ap->base, ap->csw);
-
 	return ap;
 }
 
-
 void adiv5_dp_init(ADIv5_DP_t *dp)
 {
+	volatile bool probed = false;
 	volatile uint32_t ctrlstat = 0;
-
 	adiv5_dp_ref(dp);
 
 	volatile struct exception e;
@@ -411,37 +462,78 @@ void adiv5_dp_init(ADIv5_DP_t *dp)
 		(ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK)) !=
 		(ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK));
 
-	if(DO_RESET_SEQ) {
-		/* This AP reset logic is described in ADIv5, but fails to work
-		 * correctly on STM32.  CDBGRSTACK is never asserted, and we
-		 * just wait forever.
-		 */
+	/* This AP reset logic is described in ADIv5, but fails to work
+	 * correctly on STM32.	CDBGRSTACK is never asserted, and we
+	 * just wait forever.  This scenario is described in B2.4.1
+	 * so we have a timeout mechanism in addition to the sensing one.
+	 */
 
-		/* Write request for debug reset */
-		adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT,
-				ctrlstat |= ADIV5_DP_CTRLSTAT_CDBGRSTREQ);
-		/* Wait for acknowledge */
-		while(!((ctrlstat = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT)) &
-				ADIV5_DP_CTRLSTAT_CDBGRSTACK));
+	/* Write request for debug reset */
+	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT,
+				   ctrlstat |= ADIV5_DP_CTRLSTAT_CDBGRSTREQ);
 
-		/* Write request for debug reset release */
-		adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT,
-				ctrlstat &= ~ADIV5_DP_CTRLSTAT_CDBGRSTREQ);
-		/* Wait for acknowledge */
-		while(adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT) &
-				ADIV5_DP_CTRLSTAT_CDBGRSTACK);
+	platform_timeout timeout;
+	platform_timeout_set(&timeout,200);
+	/* Wait for acknowledge */
+	while ((!platform_timeout_is_expired(&timeout)) &&
+		   (!((ctrlstat = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT)) & ADIV5_DP_CTRLSTAT_CDBGRSTACK))
+		);
+
+	/* Write request for debug reset release */
+	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT,
+				   ctrlstat &= ~ADIV5_DP_CTRLSTAT_CDBGRSTREQ);
+
+	platform_timeout_set(&timeout,200);
+	/* Wait for acknowledge */
+	while ((!platform_timeout_is_expired(&timeout)) &&
+		   (adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT) & ADIV5_DP_CTRLSTAT_CDBGRSTACK)
+		);
+	DEBUG("RESET_SEQ %s\n", (platform_timeout_is_expired(&timeout)) ? "failed": "succeeded");
+
+	dp->dp_idcode =  adiv5_dp_read(dp, ADIV5_DP_IDCODE);
+	if ((dp->dp_idcode & ADIV5_DP_VERSION_MASK) == ADIV5_DPv2) {
+		/* Read TargetID. Can be done with device in WFI, sleep or reset!*/
+		adiv5_dp_write(dp, ADIV5_DP_SELECT, ADIV5_DP_BANK2);
+		dp->targetid = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT);
+		adiv5_dp_write(dp, ADIV5_DP_SELECT, ADIV5_DP_BANK0);
+		DEBUG("TARGETID %08" PRIx32 "\n", dp->targetid);
 	}
-
 	/* Probe for APs on this DP */
-	for(int i = 0; i < 256; i++) {
-		ADIv5_AP_t *ap = adiv5_new_ap(dp, i);
-		if (ap == NULL)
-			continue;
-
+	uint32_t last_base = 0;
+	int void_aps = 0;
+	for(int i = 0; (i < 256) && (void_aps < 8); i++) {
+		ADIv5_AP_t *ap = NULL;
+		if (adiv5_ap_setup(i))
+			ap = adiv5_new_ap(dp, i);
+		if (ap == NULL) {
+			void_aps++;
+			adiv5_ap_cleanup(i);
+			if (i == 0)
+				return;
+			else
+				continue;
+		}
+		if (ap->base == last_base) {
+			DEBUG("AP %d: Duplicate base\n", i);
+			adiv5_ap_cleanup(i);
+			/* FIXME: Should we expect valid APs behind duplicate ones? */
+			return;
+		}
+		last_base = ap->base;
 		extern void kinetis_mdm_probe(ADIv5_AP_t *);
 		kinetis_mdm_probe(ap);
 
-		if (ap->base == 0xffffffff) {
+		extern void nrf51_mdm_probe(ADIv5_AP_t *);
+		nrf51_mdm_probe(ap);
+
+		extern void efm32_aap_probe(ADIv5_AP_t *);
+		efm32_aap_probe(ap);
+
+		/* Check the Debug Base Address register. See ADIv5
+		 * Specification C2.6.1 */
+		if (!(ap->base & ADIV5_AP_BASE_PRESENT) ||
+			(ap->base == 0xffffffff)) {
+			/* Debug Base Address not present in this MEM-AP */
 			/* No debug entries... useless AP */
 			adiv5_ap_unref(ap);
 			continue;
@@ -451,19 +543,24 @@ void adiv5_dp_init(ADIv5_DP_t *dp)
 		 * AP should be unref'd if not valid.
 		 */
 
-		/* The rest sould only be added after checking ROM table */
-		adiv5_component_probe(ap, ap->base);
+		/* The rest should only be added after checking ROM table */
+		probed |= adiv5_component_probe(ap, ap->base, 0, 0);
+		if (!probed && (dp->idcode & 0xfff) == 0x477) {
+			DEBUG("-> cortexm_probe forced\n");
+			cortexm_probe(ap, true);
+			probed = true;
+		}
 	}
 	adiv5_dp_unref(dp);
 }
 
-enum align {
-	ALIGN_BYTE =  0,
-	ALIGN_HALFWORD = 1,
-	ALIGN_WORD = 2
-};
 #define ALIGNOF(x) (((x) & 3) == 0 ? ALIGN_WORD : \
                     (((x) & 1) == 0 ? ALIGN_HALFWORD : ALIGN_BYTE))
+
+#if !defined(JTAG_HL)
+
+bool adiv5_ap_setup(int i) {(void)i; return true;}
+void adiv5_ap_cleanup(int i) {(void)i;}
 
 /* Program the CSW and TAR for sequencial access at a given width */
 static void ap_mem_access_setup(ADIv5_AP_t *ap, uint32_t addr, enum align align)
@@ -477,6 +574,7 @@ static void ap_mem_access_setup(ADIv5_AP_t *ap, uint32_t addr, enum align align)
 	case ALIGN_HALFWORD:
 		csw |= ADIV5_AP_CSW_SIZE_HALFWORD;
 		break;
+	case ALIGN_DWORD:
 	case ALIGN_WORD:
 		csw |= ADIV5_AP_CSW_SIZE_WORD;
 		break;
@@ -495,6 +593,7 @@ static void * extract(void *dest, uint32_t src, uint32_t val, enum align align)
 	case ALIGN_HALFWORD:
 		*(uint16_t *)dest = (val >> ((src & 0x2) << 3) & 0xFFFF);
 		break;
+	case ALIGN_DWORD:
 	case ALIGN_WORD:
 		*(uint32_t *)dest = val;
 		break;
@@ -502,8 +601,7 @@ static void * extract(void *dest, uint32_t src, uint32_t val, enum align align)
 	return (uint8_t *)dest + (1 << align);
 }
 
-void
-adiv5_mem_read(ADIv5_AP_t *ap, void *dest, uint32_t src, size_t len)
+void adiv5_mem_read(ADIv5_AP_t *ap, void *dest, uint32_t src, size_t len)
 {
 	uint32_t tmp;
 	uint32_t osrc = src;
@@ -533,11 +631,10 @@ adiv5_mem_read(ADIv5_AP_t *ap, void *dest, uint32_t src, size_t len)
 	extract(dest, src, tmp, align);
 }
 
-void
-adiv5_mem_write(ADIv5_AP_t *ap, uint32_t dest, const void *src, size_t len)
+void adiv5_mem_write_sized(ADIv5_AP_t *ap, uint32_t dest, const void *src,
+					  size_t len, enum align align)
 {
 	uint32_t odest = dest;
-	enum align align = MIN(ALIGNOF(dest), ALIGNOF(len));
 
 	len >>= align;
 	ap_mem_access_setup(ap, dest, align);
@@ -551,6 +648,7 @@ adiv5_mem_write(ADIv5_AP_t *ap, uint32_t dest, const void *src, size_t len)
 		case ALIGN_HALFWORD:
 			tmp = ((uint32_t)*(uint16_t *)src) << ((dest & 2) << 3);
 			break;
+		case ALIGN_DWORD:
 		case ALIGN_WORD:
 			tmp = *(uint32_t *)src;
 			break;
@@ -582,4 +680,11 @@ uint32_t adiv5_ap_read(ADIv5_AP_t *ap, uint16_t addr)
 			((uint32_t)ap->apsel << 24)|(addr & 0xF0));
 	ret = adiv5_dp_read(ap->dp, addr);
 	return ret;
+}
+#endif
+
+void adiv5_mem_write(ADIv5_AP_t *ap, uint32_t dest, const void *src, size_t len)
+{
+	enum align align = MIN(ALIGNOF(dest), ALIGNOF(len));
+	adiv5_mem_write_sized(ap, dest, src, len, align);
 }

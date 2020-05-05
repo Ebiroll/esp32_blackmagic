@@ -43,6 +43,9 @@ static void cortexa_regs_read(target *t, void *data);
 static void cortexa_regs_write(target *t, const void *data);
 static void cortexa_regs_read_internal(target *t);
 static void cortexa_regs_write_internal(target *t);
+static ssize_t cortexa_reg_read(target *t, int reg, void *data, size_t max);
+static ssize_t cortexa_reg_write(target *t, int reg, const void *data, size_t max);
+
 
 static void cortexa_reset(target *t);
 static enum target_halt_reason cortexa_halt_poll(target *t, target_addr *watch);
@@ -323,8 +326,17 @@ bool cortexa_probe(ADIv5_AP_t *apb, uint32_t debug_base)
 	target *t;
 
 	t = target_new();
+	if (!t) {
+		return false;
+	}
+
 	adiv5_ap_ref(apb);
 	struct cortexa_priv *priv = calloc(1, sizeof(*priv));
+	if (!priv) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return false;
+	}
+
 	t->priv = priv;
 	t->priv_free = free;
 	priv->apb = apb;
@@ -348,6 +360,8 @@ bool cortexa_probe(ADIv5_AP_t *apb, uint32_t debug_base)
 	t->tdesc = tdesc_cortex_a;
 	t->regs_read = cortexa_regs_read;
 	t->regs_write = cortexa_regs_write;
+	t->reg_read = cortexa_reg_read;
+	t->reg_write = cortexa_reg_write;
 
 	t->reset = cortexa_reset;
 	t->halt_request = cortexa_halt_request;
@@ -457,6 +471,47 @@ static void cortexa_regs_write(target *t, const void *data)
 {
 	struct cortexa_priv *priv = (struct cortexa_priv *)t->priv;
 	memcpy(&priv->reg_cache, data, t->regs_size);
+}
+
+static ssize_t ptr_for_reg(target *t, int reg, void **r)
+{
+	struct cortexa_priv *priv = (struct cortexa_priv *)t->priv;
+	switch (reg) {
+	case 0 ... 15:
+		*r = &priv->reg_cache.r[reg];
+		return 4;
+	case 16:
+		*r = &priv->reg_cache.cpsr;
+		return 4;
+	case 17:
+		*r = &priv->reg_cache.fpscr;
+		return 4;
+	case 18 ... 33:
+		*r = &priv->reg_cache.d[reg - 18];
+		return 8;
+	default:
+		return -1;
+	}
+}
+
+static ssize_t cortexa_reg_read(target *t, int reg, void *data, size_t max)
+{
+	void *r = NULL;
+	size_t s = ptr_for_reg(t, reg, &r);
+	if (s > max)
+		return -1;
+	memcpy(data, r, s);
+	return s;
+}
+
+static ssize_t cortexa_reg_write(target *t, int reg, const void *data, size_t max)
+{
+	void *r = NULL;
+	size_t s = ptr_for_reg(t, reg, &r);
+	if (s > max)
+		return -1;
+	memcpy(r, data, s);
+	return s;
 }
 
 static void cortexa_regs_read_internal(target *t)

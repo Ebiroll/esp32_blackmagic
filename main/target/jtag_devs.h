@@ -1,7 +1,7 @@
 /*
  * This file is part of the Black Magic Debug project.
  *
- * Copyright (C) 2017  Black Sphere Technologies Ltd.
+ * Copyright (C) 2011  Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
  *
  * This program is free software: you can redistribute it and/or modify
@@ -17,21 +17,12 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include <stdint.h>
-#include "stub.h"
 
-/* Non-Volatile Memory Controller (NVMC) Registers */
-#define NVMC           ((volatile uint32_t *)0x4001E000)
-#define NVMC_READY     NVMC[0x100]
+typedef const struct jtag_dev_descr_s {
+	const uint32_t idcode;
+	const uint32_t idmask;
+	const char * const descr;
+	void (*const handler)(jtag_dev_t *dev);
+} jtag_dev_descr_t;
+extern jtag_dev_descr_t dev_descr[];
 
-//void __attribute__((naked))
-void nrf51_flash_write_stub(volatile uint32_t *dest, uint32_t *src, uint32_t size)
-{
-	for (int i=0; i < size; i += 4) {
-		*dest++ = *src++;
-		while (!(NVMC_READY & 1))
-			;
-	}
-
-	stub_exit(0);
-}

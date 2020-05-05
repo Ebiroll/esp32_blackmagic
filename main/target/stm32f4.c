@@ -3,6 +3,8 @@
  *
  * Copyright (C) 2011  Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
+ * Copyright (C) 2017, 2018  Uwe Bonnes
+ *                           <bon@elektron.ikp.physik.tu-darmstadt.de>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -35,7 +37,7 @@
 #include "target_internal.h"
 #include "cortexm.h"
 
-static bool stm32f4_cmd_erase_mass(target *t);
+static bool stm32f4_cmd_erase_mass(target *t, int argc, const char **argv);
 static bool stm32f4_cmd_option(target *t, int argc, char *argv[]);
 static bool stm32f4_cmd_psize(target *t, int argc, char *argv[]);
 
@@ -44,7 +46,7 @@ const struct command_s stm32f4_cmd_list[] = {
 	 "Erase entire flash memory"},
 	{"option", (cmd_handler)stm32f4_cmd_option, "Manipulate option bytes"},
 	{"psize", (cmd_handler)stm32f4_cmd_psize,
-	 "Configure flash write parallelism: (x8|x32(default))"},
+	 "Configure flash write parallelism: (x8|x16|x32(default)|x64)"},
 	{NULL, NULL, NULL}
 };
 
@@ -97,43 +99,21 @@ static int stm32f4_flash_write(struct target_flash *f,
 #define F7_FLASHSIZE	0x1FF0F442
 #define F72X_FLASHSIZE	0x1FF07A22
 #define DBGMCU_IDCODE	0xE0042000
-#define ARM_CPUID	0xE000ED00
-
 #define DBGMCU_CR		0xE0042004
-#define DBG_STANDBY		(1 << 0)
-#define DBG_STOP		(1 << 1)
-#define DBG_SLEEP		(1 << 2)
-
-#define DBGMCU_APB1_FZ	0xE0042008
-#define DBG_WWDG_STOP	(1 << 11)
-#define DBG_IWDG_STOP	(1 << 12)
-
-/* This routine uses word access.  Only usable on target voltage >2.7V */
-static const uint16_t stm32f4_flash_write_x32_stub[] = {
-#include "flashstub/stm32f4_x32.stub"
-};
-
-/* This routine uses byte access. Usable on target voltage <2.2V */
-static const uint16_t stm32f4_flash_write_x8_stub[] = {
-#include "flashstub/stm32f4_x8.stub"
-};
-
-#define SRAM_BASE 0x20000000
-#define STUB_BUFFER_BASE \
-	ALIGN(SRAM_BASE + MAX(sizeof(stm32f4_flash_write_x8_stub), \
-			      sizeof(stm32f4_flash_write_x32_stub)), 4)
+#define DBG_SLEEP		(1 <<  0)
+#define ARM_CPUID	0xE000ED00
 
 #define AXIM_BASE 0x8000000
 #define ITCM_BASE 0x0200000
 
 struct stm32f4_flash {
 	struct target_flash f;
+	enum align psize;
 	uint8_t base_sector;
-	uint8_t psize;
 	uint8_t bank_split;
 };
 
-enum ID_STM32F47 {
+enum IDS_STM32F247 {
 	ID_STM32F20X  = 0x411,
 	ID_STM32F40X  = 0x413,
 	ID_STM32F42X  = 0x419,
@@ -154,23 +134,76 @@ static void stm32f4_add_flash(target *t,
                               uint32_t addr, size_t length, size_t blocksize,
                               unsigned int base_sector, int split)
 {
+	if (length == 0) return;
 	struct stm32f4_flash *sf = calloc(1, sizeof(*sf));
-	struct target_flash *f = &sf->f;
+	struct target_flash *f;
+	if (!sf) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return;
+	}
+
+	f = &sf->f;
 	f->start = addr;
 	f->length = length;
 	f->blocksize = blocksize;
 	f->erase = stm32f4_flash_erase;
 	f->write = stm32f4_flash_write;
+	f->buf_size = 1024;
 	f->erased = 0xff;
 	sf->base_sector = base_sector;
-	sf->psize = 32;
 	sf->bank_split = split;
+	sf->psize = ALIGN_WORD;
 	target_add_flash(t, f);
+}
+
+char *stm32f4_get_chip_name(uint32_t idcode)
+{
+	switch(idcode){
+	case ID_STM32F40X: /* F40XxE/G */
+		return "STM32F40x";
+	case ID_STM32F42X: /* F42XxG/I */
+		return "STM32F42x";
+	case ID_STM32F46X: /* 469/479 xG/I*/
+		return "STM32F47x";
+	case ID_STM32F20X: /* F205 xB/C/E/G*/
+		return "STM32F2";
+	case ID_STM32F446: /* F446 xC/E*/
+		return "STM32F446";
+	case ID_STM32F401C: /* F401 B/C RM0368 Rev.3 */
+		return "STM32F401C";
+	case ID_STM32F411: /* F411 xC/E  RM0383 Rev.4 */
+		return "STM32F411";
+	case ID_STM32F412: /* F412 xG/I  RM0402 Rev.4, 256 kB Ram */
+		return "STM32F412";
+	case ID_STM32F401E: /* F401 D/E RM0368 Rev.3 */
+		return "STM32F401E";
+	case ID_STM32F413: /* F413xG/H  RM0430 Rev.2, 320 kB Ram, 1.5 MB flash. */
+		return "STM32F413";
+	case ID_STM32F74X: /* F74XxG/I RM0385 Rev.4 */
+		return "STM32F74x";
+	case ID_STM32F76X: /* F76XxE/G F77x RM0410 */
+		return "STM32F76x";
+	case ID_STM32F72X: /* F72/3xC/E RM0431 */
+		return "STM32F72x";
+	default:
+		return NULL;
+	}
+}
+
+static void stm32f7_detach(target *t)
+{
+	target_mem_write32(t, DBGMCU_CR, t->target_storage);
+	cortexm_detach(t);
 }
 
 bool stm32f4_probe(target *t)
 {
-	uint32_t idcode = target_mem_read32(t, DBGMCU_IDCODE) & 0xFFF;
+	ADIv5_AP_t *ap = cortexm_ap(t);
+	uint32_t idcode;
+
+	idcode = (ap->dp->targetid >> 16) & 0xfff;
+	if (!idcode)
+		idcode = target_mem_read32(t, DBGMCU_IDCODE) & 0xFFF;
 
 	if (idcode == ID_STM32F20X) {
 		/* F405 revision A have a wrong IDCODE, use ARM_CPUID to make the
@@ -181,6 +214,11 @@ bool stm32f4_probe(target *t)
 			idcode = ID_STM32F40X;
 	}
 	switch(idcode) {
+	case ID_STM32F74X: /* F74x RM0385 Rev.4 */
+	case ID_STM32F76X: /* F76x F77x RM0410 */
+	case ID_STM32F72X: /* F72x F73x RM0431 */
+		t->detach = stm32f7_detach;
+		/* fall through */
 	case ID_STM32F40X:
 	case ID_STM32F42X: /* 427/437 */
 	case ID_STM32F46X: /* 469/479 */
@@ -191,13 +229,10 @@ bool stm32f4_probe(target *t)
 	case ID_STM32F412: /* F412     RM0402 Rev.4, 256 kB Ram */
 	case ID_STM32F401E: /* F401 D/E RM0368 Rev.3 */
 	case ID_STM32F413: /* F413     RM0430 Rev.2, 320 kB Ram, 1.5 MB flash. */
-	case ID_STM32F74X: /* F74x RM0385 Rev.4 */
-	case ID_STM32F76X: /* F76x F77x RM0410 */
-	case ID_STM32F72X: /* F72x F73x RM0431 */
 		t->idcode = idcode;
-		t->driver = "STM32F4";
+		t->driver = stm32f4_get_chip_name(idcode);
 		t->attach = stm32f4_attach;
-		target_add_commands(t, stm32f4_cmd_list, "stm32f4");
+		target_add_commands(t, stm32f4_cmd_list, t->driver);
 		return true;
 	default:
 		return false;
@@ -206,78 +241,68 @@ bool stm32f4_probe(target *t)
 
 static bool stm32f4_attach(target *t)
 {
-	const char* designator = NULL;
 	bool dual_bank = false;
 	bool has_ccmram = false;
 	bool is_f7  = false;
 	bool large_sectors = false;
-	uint32_t flashsize_base = F4_FLASHSIZE;
+	uint16_t max_flashsize;
 
 	if (!cortexm_attach(t))
 		return false;
 
 	switch(t->idcode) {
 	case ID_STM32F40X:
-		designator = "STM32F40x";
 		has_ccmram = true;
+		max_flashsize = 1024;
 		break;
 	case ID_STM32F42X: /* 427/437 */
-		designator = "STM32F42x";
 		has_ccmram = true;
 		dual_bank  = true;
+		max_flashsize = 2048;
 		break;
 	case ID_STM32F46X: /* 469/479 */
-		designator = "STM32F47x";
 		has_ccmram = true;
 		dual_bank  = true;
-		break;
-	case ID_STM32F20X: /* F205 */
-		designator = "STM32F2";
-		break;
-	case ID_STM32F446: /* F446 */
-		designator = "STM32F446";
+		max_flashsize = 512;
 		break;
 	case ID_STM32F401C: /* F401 B/C RM0368 Rev.3 */
-		designator = "STM32F401C";
-		break;
-	case ID_STM32F411: /* F411     RM0383 Rev.4 */
-		designator = "STM32F411";
-		break;
-	case ID_STM32F412: /* F412     RM0402 Rev.4, 256 kB Ram */
-		designator = "STM32F412";
+		max_flashsize = 256;
 		break;
 	case ID_STM32F401E: /* F401 D/E RM0368 Rev.3 */
-		designator = "STM32F401E";
+	case ID_STM32F411:  /* F411      RM0383 Rev.4 */
+	case ID_STM32F446:  /* F446 */
+		max_flashsize = 512;
+		break;
+	case ID_STM32F20X:  /* F205xB/C/E/G */
+	case ID_STM32F412:  /* F412xE/G  RM0402 Rev.4, 256 kB Ram */
+		max_flashsize = 1024;
 		break;
 	case ID_STM32F413: /* F413     RM0430 Rev.2, 320 kB Ram, 1.5 MB flash. */
-		designator = "STM32F413";
+		max_flashsize = 1536;
 		break;
 	case ID_STM32F74X: /* F74x RM0385 Rev.4 */
-		designator = "STM32F74x";
 		is_f7 = true;
 		large_sectors = true;
-		flashsize_base = F7_FLASHSIZE;
+		max_flashsize = 1024;
 		break;
 	case ID_STM32F76X: /* F76x F77x RM0410 */
-		designator = "STM32F76x";
 		is_f7 = true;
 		dual_bank = true;
-		flashsize_base = F7_FLASHSIZE;
+		large_sectors = true;
+		max_flashsize = 2048;
 		break;
 	case ID_STM32F72X: /* F72x F73x RM0431 */
-		designator = "STM32F72x";
 		is_f7 = true;
-		flashsize_base = F72X_FLASHSIZE;
+		max_flashsize = 512;
 		break;
 	default:
 		return false;
 	}
-	target_mem_write32(t, DBGMCU_CR, DBG_STANDBY| DBG_STOP | DBG_SLEEP);
-	t->driver = designator;
 	bool use_dual_bank = false;
 	target_mem_map_free(t);
-	uint32_t flashsize = target_mem_read32(t, flashsize_base) & 0xffff;
 	if (is_f7) {
+		t->target_storage = target_mem_read32(t, DBGMCU_CR);
+		target_mem_write32(t, DBGMCU_CR, DBG_SLEEP);
 		target_add_ram(t, 0x00000000, 0x4000);  /* 16 k ITCM Ram */
 		target_add_ram(t, 0x20000000, 0x20000); /* 128 k DTCM Ram */
 		target_add_ram(t, 0x20020000, 0x60000); /* 384 k Ram */
@@ -292,7 +317,7 @@ static bool stm32f4_attach(target *t)
 		target_add_ram(t, 0x20000000, 0x50000);     /* 320 k RAM */
 		if (dual_bank) {
 			use_dual_bank = true;
-			if (flashsize < 0x800) {
+			if (max_flashsize < 0x800) {
 				/* Check Dual-bank on 1 Mbyte Flash memory devices*/
 				uint32_t optcr;
 				optcr = target_mem_read32(t, FLASH_OPTCR);
@@ -303,11 +328,11 @@ static bool stm32f4_attach(target *t)
 	int split = 0;
 	uint32_t banksize;
 	if (use_dual_bank) {
-		banksize = flashsize << 9; /* flas split on two sectors. */
-		split = (flashsize == 0x400) ? 8 : 12;
+		banksize = max_flashsize << 9; /* flash split on two sectors. */
+		split = (max_flashsize == 0x400) ? 8 : 12;
 	}
 	else
-		banksize = flashsize << 10;
+		banksize = max_flashsize << 10;
 	if (large_sectors) {
 		uint32_t remains = banksize - 0x40000;
 		/* 256 k in small sectors.*/
@@ -318,15 +343,17 @@ static bool stm32f4_attach(target *t)
 		stm32f4_add_flash(t, 0x8020000, 0x20000, 0x20000, 4, split);
 		stm32f4_add_flash(t, 0x8040000, remains, 0x40000, 5, split);
 	} else {
-		uint32_t remains = banksize - 0x20000; /* 128 k in small sectors.*/
+		uint32_t remains = 0;
+		if (banksize > 0x20000)
+			remains = banksize - 0x20000; /* 128 k in small sectors.*/
 		if (is_f7) {
 			stm32f4_add_flash(t, ITCM_BASE, 0x10000,  0x4000,  0, split);
-			stm32f4_add_flash(t, 0x0210000, 0x10000, 0x10000,  4, split);
-			stm32f4_add_flash(t, 0x0220000, remains, 0x20000,  5, split);
 		}
 		stm32f4_add_flash(t, 0x8000000, 0x10000,  0x4000,  0, split);
-		stm32f4_add_flash(t, 0x8010000, 0x10000, 0x10000,  4, split);
-		stm32f4_add_flash(t, 0x8020000, remains, 0x20000,  5, split);
+		if (banksize > 0x10000) {
+			stm32f4_add_flash(t, 0x8010000, 0x10000, 0x10000,  4, split);
+			stm32f4_add_flash(t, 0x8020000, remains, 0x20000,  5, split);
+		}
 		if (use_dual_bank) {
 			if (is_f7) {
 				uint32_t bk1 = ITCM_BASE + banksize;
@@ -362,9 +389,15 @@ static int stm32f4_flash_erase(struct target_flash *f, target_addr addr,
 	uint8_t sector = sf->base_sector + (addr - f->start)/f->blocksize;
 	stm32f4_flash_unlock(t);
 
+	enum align psize = ALIGN_WORD;
+	for (struct target_flash *f = t->flash; f; f = f->next) {
+		if (f->write == stm32f4_flash_write) {
+			psize = ((struct stm32f4_flash *)f)->psize;
+		}
+	}
 	while(len) {
 		uint32_t cr = FLASH_CR_EOPIE | FLASH_CR_ERRIE | FLASH_CR_SER |
-		              (sector << 3);
+			(psize * FLASH_CR_PSIZE16) | (sector << 3);
 		/* Flash page erase instruction */
 		target_mem_write32(t, FLASH_CR, cr);
 		/* write address to FMA */
@@ -376,7 +409,10 @@ static int stm32f4_flash_erase(struct target_flash *f, target_addr addr,
 				DEBUG("stm32f4 flash erase: comm error\n");
 				return -1;
 			}
-		len -= f->blocksize;
+		if (len > f->blocksize)
+			len -= f->blocksize;
+		else
+			len = 0;
 		sector++;
 		if ((sf->bank_split) && (sector == sf->bank_split))
 			sector = 16;
@@ -398,21 +434,33 @@ static int stm32f4_flash_write(struct target_flash *f,
 	if ((dest >= ITCM_BASE) && (dest < AXIM_BASE)) {
 		dest = AXIM_BASE + (dest - ITCM_BASE);
 	}
+	target *t = f->t;
+	uint32_t sr;
+	enum align psize = ((struct stm32f4_flash *)f)->psize;
+	target_mem_write32(t, FLASH_CR,
+					   (psize * FLASH_CR_PSIZE16) | FLASH_CR_PG);
+	cortexm_mem_write_sized(t, dest, src, len, psize);
+	/* Read FLASH_SR to poll for BSY bit */
+	/* Wait for completion or an error */
+	do {
+		sr = target_mem_read32(t, FLASH_SR);
+		if(target_check_error(t)) {
+			DEBUG("stm32f4 flash write: comm error\n");
+			return -1;
+		}
+	} while (sr & FLASH_SR_BSY);
 
-	/* Write buffer to target ram call stub */
-	if (((struct stm32f4_flash *)f)->psize == 32)
-		target_mem_write(f->t, SRAM_BASE, stm32f4_flash_write_x32_stub,
-		                 sizeof(stm32f4_flash_write_x32_stub));
-	else
-		target_mem_write(f->t, SRAM_BASE, stm32f4_flash_write_x8_stub,
-		                 sizeof(stm32f4_flash_write_x8_stub));
-	target_mem_write(f->t, STUB_BUFFER_BASE, src, len);
-	return cortexm_run_stub(f->t, SRAM_BASE, dest,
-	                        STUB_BUFFER_BASE, len, 0);
+	if (sr & SR_ERROR_MASK) {
+		DEBUG("stm32f4 flash write error 0x%" PRIx32 "\n", sr);
+			return -1;
+	}
+	return 0;
 }
 
-static bool stm32f4_cmd_erase_mass(target *t)
+static bool stm32f4_cmd_erase_mass(target *t, int argc, const char **argv)
 {
+	(void)argc;
+	(void)argv;
 	const char spinner[] = "|/-\\";
 	int spinindex = 0;
 	struct target_flash *f = t->flash;
@@ -468,7 +516,7 @@ static bool stm32f4_cmd_erase_mass(target *t)
  * * Documentation for F413 with OPTCR default = 0ffffffed seems wrong!
  */
 
-bool optcr_mask(target *t, uint32_t *val)
+static bool optcr_mask(target *t, uint32_t *val)
 {
 	switch (t->idcode) {
 	case ID_STM32F20X:
@@ -646,22 +694,28 @@ static bool stm32f4_cmd_option(target *t, int argc, char *argv[])
 static bool stm32f4_cmd_psize(target *t, int argc, char *argv[])
 {
 	if (argc == 1) {
-		uint8_t psize = 8;
+		enum align psize = ALIGN_WORD;
 		for (struct target_flash *f = t->flash; f; f = f->next) {
 			if (f->write == stm32f4_flash_write) {
 				psize = ((struct stm32f4_flash *)f)->psize;
 			}
 		}
 		tc_printf(t, "Flash write parallelism: %s\n",
-		          psize == 32 ? "x32" : "x8");
+		          psize == ALIGN_DWORD ? "x64" :
+		          psize == ALIGN_WORD ? "x32" :
+				  psize == ALIGN_HALFWORD ? "x16" : "x8");
 	} else {
-		uint8_t psize;
+		enum align psize;
 		if (!strcmp(argv[1], "x8")) {
-			psize = 8;
+			psize = ALIGN_BYTE;
+		} else if (!strcmp(argv[1], "x16")) {
+			psize = ALIGN_HALFWORD;
 		} else if (!strcmp(argv[1], "x32")) {
-			psize = 32;
+			psize = ALIGN_WORD;
+		} else if (!strcmp(argv[1], "x64")) {
+			psize = ALIGN_DWORD;
 		} else {
-			tc_printf(t, "usage: monitor psize (x8|x32)\n");
+			tc_printf(t, "usage: monitor psize (x8|x16|x32|x32)\n");
 			return false;
 		}
 		for (struct target_flash *f = t->flash; f; f = f->next) {

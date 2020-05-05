@@ -169,6 +169,11 @@ static const size_t __nvp_size[16] = {
 static void sam4l_add_flash(target *t, uint32_t addr, size_t length)
 {
 	struct target_flash *f = calloc(1, sizeof(struct target_flash));
+	if (!f) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return;
+	}
+
 	f->start = addr;
 	f->length = length;
 	f->blocksize = SAM4L_PAGE_SIZE;
@@ -223,7 +228,6 @@ bool sam4l_probe(target *t)
 {
 	size_t	ram_size, flash_size;
 
-	DEBUG("\nSAM4L: Probe function called\n");
 	t->idcode = target_mem_read32(t, SAM4L_CHIPID_CIDR);
 	if (((t->idcode >> CHIPID_CIDR_ARCH_SHIFT) & CHIPID_CIDR_ARCH_MASK) == SAM4L_ARCH) {
 		t->driver = "Atmel SAM4L";
@@ -389,7 +393,10 @@ sam4l_flash_erase(struct target_flash *f, target_addr addr, size_t len)
 		if (sam4l_flash_command(t, page, FLASH_CMD_EP)) {
 			return -1;
 		}
-		len -= SAM4L_PAGE_SIZE;
+		if (len > SAM4L_PAGE_SIZE)
+			len -= SAM4L_PAGE_SIZE;
+		else
+			len = 0;
 		addr += SAM4L_PAGE_SIZE;
 	}
 	return 0;

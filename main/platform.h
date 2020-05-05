@@ -39,6 +39,8 @@
 #include "driver/gpio.h"
 #include <freertos/FreeRTOS.h>
 
+#define BOARD_IDENT "Black Magic Probe (esp32), (Firmware 0.1)"
+
 #define TMS_SET_MODE() do { } while (0)
 
 #define TMS_PIN (17) // On wroover module, this is PSRAM clock

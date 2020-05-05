@@ -22,6 +22,9 @@
 #define __GENERAL_H
 
 #define _GNU_SOURCE
+#if !defined(__USE_MINGW_ANSI_STDIO)
+# define __USE_MINGW_ANSI_STDIO 1
+#endif
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -29,12 +32,12 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <inttypes.h>
+#include <sys/types.h>
 
 #include "platform.h"
 #include "platform_support.h"
 
 #ifndef DEBUG
-#include <stdio.h>
 #define DEBUG	printf
 #endif
 

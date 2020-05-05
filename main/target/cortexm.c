@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2012  Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
+ * and Koen De Vleeschauwer.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,6 +32,8 @@
 #include "target.h"
 #include "target_internal.h"
 #include "cortexm.h"
+#include "platform.h"
+#include "command.h"
 
 #include <unistd.h>
 
@@ -50,9 +53,12 @@ const struct command_s cortexm_cmd_list[] = {
 static void cortexm_regs_read(target *t, void *data);
 static void cortexm_regs_write(target *t, const void *data);
 static uint32_t cortexm_pc_read(target *t);
+static ssize_t cortexm_reg_read(target *t, int reg, void *data, size_t max);
+static ssize_t cortexm_reg_write(target *t, int reg, const void *data, size_t max);
 
 static void cortexm_reset(target *t);
 static enum target_halt_reason cortexm_halt_poll(target *t, target_addr *watch);
+static void cortexm_halt_resume(target *t, bool step);
 static void cortexm_halt_request(target *t);
 static int cortexm_fault_unwind(target *t);
 
@@ -237,13 +243,43 @@ static void cortexm_priv_free(void *priv)
 	free(priv);
 }
 
-bool cortexm_probe(ADIv5_AP_t *ap)
+static bool cortexm_forced_halt(target *t)
+{
+	target_halt_request(t);
+	platform_srst_set_val(false);
+	uint32_t dhcsr = 0;
+	uint32_t start_time = platform_time_ms();
+	/* Try hard to halt the target. STM32F7 in  WFI
+	   needs multiple writes!*/
+	while (platform_time_ms() < start_time + cortexm_wait_timeout) {
+		dhcsr = target_mem_read32(t, CORTEXM_DHCSR);
+		if (dhcsr == (CORTEXM_DHCSR_S_HALT | CORTEXM_DHCSR_S_REGRDY |
+					  CORTEXM_DHCSR_C_HALT | CORTEXM_DHCSR_C_DEBUGEN))
+			break;
+		target_halt_request(t);
+	}
+	if (dhcsr != 0x00030003)
+		return false;
+	return true;
+}
+
+bool cortexm_probe(ADIv5_AP_t *ap, bool forced)
 {
 	target *t;
 
 	t = target_new();
+	if (!t) {
+		return false;
+	}
+
 	adiv5_ap_ref(ap);
+	uint32_t identity = ap->idr & 0xff;
 	struct cortexm_priv *priv = calloc(1, sizeof(*priv));
+	if (!priv) {			/* calloc failed: heap exhaustion */
+		DEBUG("calloc: failed in %s\n", __func__);
+		return false;
+	}
+
 	t->priv = priv;
 	t->priv_free = cortexm_priv_free;
 	priv->ap = ap;
@@ -253,6 +289,20 @@ bool cortexm_probe(ADIv5_AP_t *ap)
 	t->mem_write = cortexm_mem_write;
 
 	t->driver = cortexm_driver_str;
+	switch (identity) {
+	case 0x11: /* M3/M4 */
+		t->core = "M3/M4";
+		break;
+	case 0x21: /* M0 */
+		t->core = "M0";
+		break;
+	case 0x31: /* M0+ */
+		t->core = "M0+";
+		break;
+	case 0x01: /* M7 */
+		t->core = "M7";
+		break;
+	}
 
 	t->attach = cortexm_attach;
 	t->detach = cortexm_detach;
@@ -261,6 +311,8 @@ bool cortexm_probe(ADIv5_AP_t *ap)
 	t->tdesc = tdesc_cortex_m;
 	t->regs_read = cortexm_regs_read;
 	t->regs_write = cortexm_regs_write;
+	t->reg_read = cortexm_reg_read;
+	t->reg_write = cortexm_reg_write;
 
 	t->reset = cortexm_reset;
 	t->halt_request = cortexm_halt_request;
@@ -296,24 +348,36 @@ bool cortexm_probe(ADIv5_AP_t *ap)
 		target_check_error(t);
 	}
 
+	/* Only force halt if read ROM Table failed and there is no DPv2
+	 * targetid!
+	 * So long, only STM32L0 is expected to enter this cause.
+	 */
+	if (forced && !ap->dp->targetid)
+		if (!cortexm_forced_halt(t))
+			return false;
+
 #define PROBE(x) \
-	do { if ((x)(t)) return true; else target_check_error(t); } while (0)
+	do { if ((x)(t)) {target_halt_resume(t, 0); return true;} else target_check_error(t); } while (0)
 
 	PROBE(stm32f1_probe);
 	PROBE(stm32f4_probe);
+	PROBE(stm32h7_probe);
 	PROBE(stm32l0_probe);   /* STM32L0xx & STM32L1xx */
 	PROBE(stm32l4_probe);
 	PROBE(lpc11xx_probe);
 	PROBE(lpc15xx_probe);
-	PROBE(lpc17xx_probe);
 	PROBE(lpc43xx_probe);
 	PROBE(sam3x_probe);
 	PROBE(sam4l_probe);
 	PROBE(nrf51_probe);
 	PROBE(samd_probe);
+	PROBE(samx5x_probe);
 	PROBE(lmi_probe);
 	PROBE(kinetis_probe);
 	PROBE(efm32_probe);
+	PROBE(msp432_probe);
+	PROBE(ke04_probe);
+	PROBE(lpc17xx_probe);
 #undef PROBE
 
 	return true;
@@ -324,16 +388,12 @@ bool cortexm_attach(target *t)
 	struct cortexm_priv *priv = t->priv;
 	unsigned i;
 	uint32_t r;
-	int tries;
 
 	/* Clear any pending fault condition */
 	target_check_error(t);
 
 	target_halt_request(t);
-	tries = 10;
-	while(!platform_srst_get_val() && !target_halt_poll(t, NULL) && --tries)
-		platform_delay(200);
-	if(!tries)
+	if (!cortexm_forced_halt(t))
 		return false;
 
 	/* Request halt on reset */
@@ -369,8 +429,6 @@ bool cortexm_attach(target *t)
 	target_mem_write32(t, CORTEXM_FPB_CTRL,
 			CORTEXM_FPB_CTRL_KEY | CORTEXM_FPB_CTRL_ENABLE);
 
-	platform_srst_set_val(false);
-
 	return true;
 }
 
@@ -389,16 +447,28 @@ void cortexm_detach(target *t)
 
 	/* Disable debug */
 	target_mem_write32(t, CORTEXM_DHCSR, CORTEXM_DHCSR_DBGKEY);
+	/* Add some clock cycles to get the CPU running again.*/
+	target_mem_read32(t, 0);
 }
 
 enum { DB_DHCSR, DB_DCRSR, DB_DCRDR, DB_DEMCR };
 
 static void cortexm_regs_read(target *t, void *data)
 {
-	ADIv5_AP_t *ap = cortexm_ap(t);
 	uint32_t *regs = data;
+	ADIv5_AP_t *ap = cortexm_ap(t);
 	unsigned i;
-
+#if defined(STLINKV2)
+	uint32_t base_regs[21];
+	extern void stlink_regs_read(ADIv5_AP_t *ap, void *data);
+	extern uint32_t stlink_reg_read(ADIv5_AP_t *ap, int idx);
+	stlink_regs_read(ap, base_regs);
+	for(i = 0; i < sizeof(regnum_cortex_m) / 4; i++)
+		*regs++ = base_regs[regnum_cortex_m[i]];
+	if (t->target_options & TOPT_FLAVOUR_V7MF)
+		for(size_t t = 0; t < sizeof(regnum_cortex_mf) / 4; t++)
+			*regs++ = stlink_reg_read(ap, regnum_cortex_mf[t]);
+#else
 	/* FIXME: Describe what's really going on here */
 	adiv5_ap_write(ap, ADIV5_AP_CSW, ap->csw | ADIV5_AP_CSW_SIZE_WORD);
 
@@ -422,12 +492,25 @@ static void cortexm_regs_read(target *t, void *data)
 			                    regnum_cortex_mf[i]);
 			*regs++ = adiv5_dp_read(ap->dp, ADIV5_AP_DB(DB_DCRDR));
 		}
+#endif
 }
 
 static void cortexm_regs_write(target *t, const void *data)
 {
-	ADIv5_AP_t *ap = cortexm_ap(t);
 	const uint32_t *regs = data;
+	ADIv5_AP_t *ap = cortexm_ap(t);
+#if defined(STLINKV2)
+	extern void stlink_reg_write(ADIv5_AP_t *ap, int num, uint32_t val);
+	for(size_t z = 0; z < sizeof(regnum_cortex_m) / 4; z++) {
+		stlink_reg_write(ap, regnum_cortex_m[z], *regs);
+		regs++;
+	}
+	if (t->target_options & TOPT_FLAVOUR_V7MF)
+		for(size_t z = 0; z < sizeof(regnum_cortex_mf) / 4; z++) {
+			stlink_reg_write(ap, regnum_cortex_mf[z], *regs);
+			regs++;
+	}
+#else
 	unsigned i;
 
 	/* FIXME: Describe what's really going on here */
@@ -456,6 +539,48 @@ static void cortexm_regs_write(target *t, const void *data)
 			                    ADIV5_AP_DB(DB_DCRSR),
 			                    0x10000 | regnum_cortex_mf[i]);
 		}
+#endif
+}
+
+int cortexm_mem_write_sized(
+	target *t, target_addr dest, const void *src, size_t len, enum align align)
+{
+	cortexm_cache_clean(t, dest, len, true);
+	adiv5_mem_write_sized(cortexm_ap(t), dest, src, len, align);
+	return target_check_error(t);
+}
+
+static int dcrsr_regnum(target *t, unsigned reg)
+{
+	if (reg < sizeof(regnum_cortex_m) / 4) {
+		return regnum_cortex_m[reg];
+	} else if ((t->target_options & TOPT_FLAVOUR_V7MF) &&
+	           (reg < (sizeof(regnum_cortex_m) +
+	                   sizeof(regnum_cortex_mf) / 4))) {
+		return regnum_cortex_mf[reg - sizeof(regnum_cortex_m)/4];
+	} else {
+		return -1;
+	}
+}
+static ssize_t cortexm_reg_read(target *t, int reg, void *data, size_t max)
+{
+	if (max < 4)
+		return -1;
+	uint32_t *r = data;
+	target_mem_write32(t, CORTEXM_DCRSR, dcrsr_regnum(t, reg));
+	*r = target_mem_read32(t, CORTEXM_DCRDR);
+	return 4;
+}
+
+static ssize_t cortexm_reg_write(target *t, int reg, const void *data, size_t max)
+{
+	if (max < 4)
+		return -1;
+	const uint32_t *r = data;
+	target_mem_write32(t, CORTEXM_DCRDR, *r);
+	target_mem_write32(t, CORTEXM_DCRSR, CORTEXM_DCRSR_REGWnR |
+	                                     dcrsr_regnum(t, reg));
+	return 4;
 }
 
 static uint32_t cortexm_pc_read(target *t)
@@ -474,31 +599,43 @@ static void cortexm_pc_write(target *t, const uint32_t val)
  * using the core debug registers in the NVIC. */
 static void cortexm_reset(target *t)
 {
+	/* Read DHCSR here to clear S_RESET_ST bit before reset */
+	target_mem_read32(t, CORTEXM_DHCSR);
+	platform_timeout to;
 	if ((t->target_options & CORTEXM_TOPT_INHIBIT_SRST) == 0) {
 		platform_srst_set_val(true);
 		platform_srst_set_val(false);
+		/* Some NRF52840 users saw invalid SWD transaction with
+		 * native/firmware without this delay.*/
+		platform_delay(10);
 	}
-
-	/* Read DHCSR here to clear S_RESET_ST bit before reset */
-	target_mem_read32(t, CORTEXM_DHCSR);
-
-	/* Request system reset from NVIC: SRST doesn't work correctly */
-	/* This could be VECTRESET: 0x05FA0001 (reset only core)
-	 *          or SYSRESETREQ: 0x05FA0004 (system reset)
-	 */
-	target_mem_write32(t, CORTEXM_AIRCR,
-	                   CORTEXM_AIRCR_VECTKEY | CORTEXM_AIRCR_SYSRESETREQ);
-
+	uint32_t dhcsr = target_mem_read32(t, CORTEXM_DHCSR);
+	if ((dhcsr & CORTEXM_DHCSR_S_RESET_ST) == 0) {
+		/* No reset seen yet, maybe as SRST is not connected, or device has
+         * CORTEXM_TOPT_INHIBIT_SRST set.
+		 * Trigger reset by AIRCR.*/
+		target_mem_write32(t, CORTEXM_AIRCR,
+						   CORTEXM_AIRCR_VECTKEY | CORTEXM_AIRCR_SYSRESETREQ);
+	}
 	/* If target needs to do something extra (see Atmel SAM4L for example) */
 	if (t->extended_reset != NULL) {
 		t->extended_reset(t);
 	}
-
-	/* Poll for release from reset */
-	while (target_mem_read32(t, CORTEXM_DHCSR) & CORTEXM_DHCSR_S_RESET_ST);
-
+	/* Wait for CORTEXM_DHCSR_S_RESET_ST to read 0, meaning reset released.*/
+	platform_timeout_set(&to, 1000);
+	while ((target_mem_read32(t, CORTEXM_DHCSR) & CORTEXM_DHCSR_S_RESET_ST) &&
+		   !platform_timeout_is_expired(&to));
+#if defined(PLATFORM_HAS_DEBUG)
+	if (platform_timeout_is_expired(&to))
+		DEBUG("Reset seem to be stuck low!\n");
+#endif
+	/* 10 ms delay to ensure that things such as the STM32 HSI clock
+	 * have started up fully. */
+	platform_delay(10);
 	/* Reset DFSR flags */
 	target_mem_write32(t, CORTEXM_DFSR, CORTEXM_DFSR_RESETALL);
+	/* Make sure we ignore any initial DAP error */
+	target_check_error(t);
 }
 
 static void cortexm_halt_request(target *t)
@@ -577,7 +714,7 @@ static enum target_halt_reason cortexm_halt_poll(target *t, target_addr *watch)
 	return TARGET_HALT_BREAKPOINT;
 }
 
-void cortexm_halt_resume(target *t, bool step)
+static void cortexm_halt_resume(target *t, bool step)
 {
 	struct cortexm_priv *priv = t->priv;
 	uint32_t dhcsr = CORTEXM_DHCSR_DBGKEY | CORTEXM_DHCSR_C_DEBUGEN;
@@ -833,7 +970,7 @@ static bool cortexm_vector_catch(target *t, int argc, char *argv[])
 	uint32_t tmp = 0;
 	unsigned i;
 
-	if ((argc < 3) || ((argv[1][0] != 'e') && (argv[1][0] != 'd'))) {
+	if (argc < 3) {
 		tc_printf(t, "usage: monitor vector_catch (enable|disable) "
 			     "(hard|int|bus|stat|chk|nocp|mm|reset)\n");
 	} else {
@@ -843,12 +980,16 @@ static bool cortexm_vector_catch(target *t, int argc, char *argv[])
 					tmp |= 1 << i;
 			}
 
-		if (argv[1][0] == 'e')
-			priv->demcr |= tmp;
-		else
-			priv->demcr &= ~tmp;
+		bool enable;
+		if (parse_enable_or_disable(argv[1], &enable)) {
+			if (enable) {
+				priv->demcr |= tmp;
+			} else {
+				priv->demcr &= ~tmp;
+			}
 
-		target_mem_write32(t, CORTEXM_DEMCR, priv->demcr);
+			target_mem_write32(t, CORTEXM_DEMCR, priv->demcr);
+		}
 	}
 
 	tc_printf(t, "Catching vectors: ");
@@ -868,11 +1009,14 @@ static bool cortexm_vector_catch(target *t, int argc, char *argv[])
 #endif
 
 /* Semihosting support */
-/* ARM Semihosting syscall numbers, from ARM doc DUI0471C, Chapter 8 */
-#define SYS_CLOSE	0x02
+/* ARM Semihosting syscall numbers, from "Semihosting for AArch32 and AArch64 Version 3.0" */
+
 #define SYS_CLOCK	0x10
+#define SYS_CLOSE	0x02
 #define SYS_ELAPSED	0x30
 #define SYS_ERRNO	0x13
+#define SYS_EXIT	0x18
+#define SYS_EXIT_EXTENDED	0x20
 #define SYS_FLEN	0x0C
 #define SYS_GET_CMDLINE	0x15
 #define SYS_HEAPINFO	0x16
@@ -892,6 +1036,28 @@ static bool cortexm_vector_catch(target *t, int argc, char *argv[])
 #define SYS_WRITEC	0x03
 #define SYS_WRITE0	0x04
 
+#if !defined(PC_HOSTED)
+/* probe memory access functions */
+static void probe_mem_read(target *t __attribute__((unused)), void *probe_dest, target_addr target_src, size_t len)
+{
+	uint8_t *dst = (uint8_t *)probe_dest;
+	uint8_t *src = (uint8_t *)target_src;
+
+	DEBUG("probe_mem_read\n");
+	while (len--) *dst++=*src++;
+	return;
+}
+
+static void probe_mem_write(target *t __attribute__((unused)), target_addr target_dest, const void *probe_src, size_t len)
+{
+	uint8_t *dst = (uint8_t *)target_dest;
+	uint8_t *src = (uint8_t *)probe_src;
+
+	DEBUG("probe_mem_write\n");
+	while (len--) *dst++=*src++;
+	return;
+}
+#endif
 static int cortexm_hostio_request(target *t)
 {
 	uint32_t arm_regs[t->regs_size];
@@ -932,6 +1098,7 @@ static int cortexm_hostio_request(target *t)
 			ret++;
 			break;
 		}
+		/* FIXME handle requests for special filename ':semihosting-features' */
 
 		ret = tc_open(t, params[0], params[2] + 1, pflag, 0644);
 		if (ret != -1)
@@ -943,45 +1110,210 @@ static int cortexm_hostio_request(target *t)
 		break;
 	case SYS_READ:	/* read */
 		ret = tc_read(t, params[0] - 1, params[1], params[2]);
-		if (ret > 0)
+		if (ret >= 0)
 			ret = params[2] - ret;
 		break;
 	case SYS_WRITE:	/* write */
 		ret = tc_write(t, params[0] - 1, params[1], params[2]);
-		if (ret > 0)
+		if (ret >= 0)
 			ret = params[2] - ret;
 		break;
 	case SYS_WRITEC: /* writec */
-		ret = tc_write(t, 2, arm_regs[1], 1);
+		ret = tc_write(t, STDERR_FILENO, arm_regs[1], 1);
 		break;
+	case SYS_WRITE0:{ /* write0 */
+		ret = -1;
+		target_addr str_begin = arm_regs[1];
+		target_addr str_end = str_begin;
+		while (target_mem_read8(t, str_end) != 0) {
+			if (target_check_error(t)) break;
+			str_end++;
+			}
+		int len = str_end - str_begin;
+		if (len != 0) {
+			int rc = tc_write(t, STDERR_FILENO, str_begin, len);
+			if (rc != len) break;
+		}
+		ret = 0;
+		break;
+		}
 	case SYS_ISTTY:	/* isatty */
 		ret = tc_isatty(t, params[0] - 1);
 		break;
 	case SYS_SEEK:	/* lseek */
-		ret = tc_lseek(t, params[0] - 1, params[1], TARGET_SEEK_SET);
+		if (tc_lseek(t, params[0] - 1, params[1], TARGET_SEEK_SET) == (long)params[1]) ret = 0;
+		else ret = -1;
 		break;
 	case SYS_RENAME:/* rename */
-		ret = tc_rename(t, params[0] - 1, params[1] + 1,
+		ret = tc_rename(t, params[0], params[1] + 1,
 				params[2], params[3] + 1);
 		break;
 	case SYS_REMOVE:/* unlink */
-		ret = tc_unlink(t, params[0] - 1, params[1] + 1);
+		ret = tc_unlink(t, params[0], params[1] + 1);
 		break;
 	case SYS_SYSTEM:/* system */
-		ret = tc_system(t, params[0] - 1, params[1] + 1);
+		/* before use first enable system calls with the following gdb command: 'set remote system-call-allowed 1' */
+		ret = tc_system(t, params[0], params[1] + 1);
 		break;
 
-	case SYS_FLEN:	/* Not supported, fake success */
-		t->tc->errno_ = 0;
-		break;
+	case SYS_FLEN:
+#if defined(PC_HOSTED)
+		 t->tc->errno_ = 0;
+		 break;
+#else
+		 {	/* file length */
+			 ret = -1;
+			 uint32_t fio_stat[16]; /* same size as fio_stat in gdb/include/gdb/fileio.h */
+			 //DEBUG("SYS_FLEN fio_stat addr %p\n", fio_stat);
+			 void (*saved_mem_read)(target *t, void *dest, target_addr src, size_t len);
+			 void (*saved_mem_write)(target *t, target_addr dest, const void *src, size_t len);
+			 saved_mem_read = t->mem_read;
+			 saved_mem_write = t->mem_write;
+			 t->mem_read = probe_mem_read;
+			 t->mem_write = probe_mem_write;
+			 int rc = tc_fstat(t, params[0] - 1, (target_addr)fio_stat); /* write fstat() result in fio_stat[] */
+			 t->mem_read = saved_mem_read;
+			 t->mem_write = saved_mem_write;
+			 if (rc) break; /* tc_fstat() failed */
+			 uint32_t fst_size_msw = fio_stat[7]; /* most significant 32 bits of fst_size in fio_stat */
+			 uint32_t fst_size_lsw = fio_stat[8]; /* least significant 32 bits of fst_size in fio_stat */
+			 if (fst_size_msw != 0) break; /* file size too large for uint32_t return type */
+			 ret = __builtin_bswap32(fst_size_lsw); /* convert from bigendian to target order */
+			 break;
+		 }
 
+	case SYS_CLOCK: /* clock */
+	case SYS_TIME: { /* time */
+		/* use same code for SYS_CLOCK and SYS_TIME, more compact */
+		ret = -1;
+		struct __attribute__((packed, aligned(4))) {
+			uint32_t ftv_sec;
+			uint64_t ftv_usec;
+		} fio_timeval;
+		//DEBUG("SYS_TIME fio_timeval addr %p\n", &fio_timeval);
+		void (*saved_mem_read)(target *t, void *dest, target_addr src, size_t len);
+		void (*saved_mem_write)(target *t, target_addr dest, const void *src, size_t len);
+		saved_mem_read = t->mem_read;
+		saved_mem_write = t->mem_write;
+		t->mem_read = probe_mem_read;
+		t->mem_write = probe_mem_write;
+		int rc = tc_gettimeofday(t, (target_addr) &fio_timeval, (target_addr) NULL); /* write gettimeofday() result in fio_timeval[] */
+		t->mem_read = saved_mem_read;
+		t->mem_write = saved_mem_write;
+		if (rc) break; /* tc_gettimeofday() failed */
+		uint32_t sec = __builtin_bswap32(fio_timeval.ftv_sec); /* convert from bigendian to target order */
+		uint64_t usec = __builtin_bswap64(fio_timeval.ftv_usec);
+		if (syscall == SYS_TIME) { /* SYS_TIME: time in seconds */
+			ret = sec;
+		} else { /* SYS_CLOCK: time in hundredths of seconds */
+			uint64_t csec64 = (sec * 1000000ull + usec)/10000ull;
+			uint32_t csec = csec64 & 0x7fffffff;
+			ret = csec;
+		}
+		break;
+		}
+
+	case SYS_READC: { /* readc */
+		uint8_t ch='?';
+		//DEBUG("SYS_READC ch addr %p\n", &ch);
+		void (*saved_mem_read)(target *t, void *dest, target_addr src, size_t len);
+		void (*saved_mem_write)(target *t, target_addr dest, const void *src, size_t len);
+		saved_mem_read = t->mem_read;
+		saved_mem_write = t->mem_write;
+		t->mem_read = probe_mem_read;
+		t->mem_write = probe_mem_write;
+		int rc = tc_read(t, STDIN_FILENO, (target_addr) &ch, 1); /* read a character in ch */
+		t->mem_read = saved_mem_read;
+		t->mem_write = saved_mem_write;
+		if (rc == 1) ret = ch;
+		else ret = -1;
+		break;
+		}
+#endif
 	case SYS_ERRNO: /* Return last errno from GDB */
 		ret = t->tc->errno_;
 		break;
 
-	case SYS_TIME:	/* gettimeofday */
-		/* FIXME How do we use gdb's gettimeofday? */
+	case SYS_EXIT: /* _exit() */
+		tc_printf(t, "_exit(0x%x)\n", params[0]);
+		target_halt_resume(t, 1);
 		break;
+
+	case SYS_EXIT_EXTENDED: /* _exit() */
+		tc_printf(t, "_exit(0x%x%08x)\n", params[1], params[0]); /* exit() with 64bit exit value */
+		target_halt_resume(t, 1);
+		break;
+
+	case SYS_GET_CMDLINE: { /* get_cmdline */
+		uint32_t retval[2];
+		ret = -1;
+		target_addr buf_ptr = params[0];
+		target_addr buf_len = params[1];
+		if (strlen(t->cmdline)+1 > buf_len) break;
+		if(target_mem_write(t, buf_ptr, t->cmdline, strlen(t->cmdline)+1)) break;
+		retval[0] = buf_ptr;
+		retval[1] = strlen(t->cmdline)+1;
+		if(target_mem_write(t, arm_regs[1], retval, sizeof(retval))) break;
+		ret = 0;
+		break;
+		}
+
+	case SYS_ISERROR: { /* iserror */
+		int errorNo = params[0];
+		ret = (errorNo == TARGET_EPERM) ||
+			  (errorNo == TARGET_ENOENT) ||
+			  (errorNo == TARGET_EINTR) ||
+			  (errorNo == TARGET_EIO) ||
+			  (errorNo == TARGET_EBADF) ||
+			  (errorNo == TARGET_EACCES) ||
+			  (errorNo == TARGET_EFAULT) ||
+			  (errorNo == TARGET_EBUSY) ||
+			  (errorNo == TARGET_EEXIST) ||
+			  (errorNo == TARGET_ENODEV) ||
+			  (errorNo == TARGET_ENOTDIR) ||
+			  (errorNo == TARGET_EISDIR) ||
+			  (errorNo == TARGET_EINVAL) ||
+			  (errorNo == TARGET_ENFILE) ||
+			  (errorNo == TARGET_EMFILE) ||
+			  (errorNo == TARGET_EFBIG) ||
+			  (errorNo == TARGET_ENOSPC) ||
+			  (errorNo == TARGET_ESPIPE) ||
+			  (errorNo == TARGET_EROFS) ||
+			  (errorNo == TARGET_ENOSYS) ||
+			  (errorNo == TARGET_ENAMETOOLONG) ||
+			  (errorNo == TARGET_EUNKNOWN);
+		break;
+		}
+
+	case SYS_HEAPINFO: /* heapinfo */
+		target_mem_write(t, arm_regs[1], &t->heapinfo, sizeof(t->heapinfo)); /* See newlib/libc/sys/arm/crt0.S */
+		break;
+
+	case SYS_TMPNAM: { /* tmpnam */
+		/* Given a target identifier between 0 and 255, returns a temporary name.
+		 * FIXME: add directory prefix */
+		target_addr buf_ptr = params[0];
+		int target_id = params[1];
+		int buf_size = params[2];
+		char fnam[]="tempXX.tmp";
+		ret = -1;
+		if (buf_ptr == 0) break;
+		if (buf_size <= 0) break;
+		if ((target_id < 0) || (target_id > 255)) break; /* target id out of range */
+		fnam[5]='A'+(target_id&0xF); /* create filename */
+		fnam[4]='A'+(target_id>>4&0xF);
+		if (strlen(fnam)+1>(uint32_t)buf_size) break; /* target buffer too small */
+		if(target_mem_write(t, buf_ptr, fnam, strlen(fnam)+1)) break; /* copy filename to target */
+		ret = 0;
+		break;
+		}
+
+	// not implemented yet:
+	case SYS_ELAPSED: /* elapsed */
+	case SYS_TICKFREQ: /* tickfreq */
+		ret = -1;
+		break;
+
 	}
 
 	arm_regs[0] = ret;
@@ -989,4 +1321,3 @@ static int cortexm_hostio_request(target *t)
 
 	return t->tc->interrupted;
 }
-

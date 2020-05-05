@@ -22,6 +22,7 @@
 #include "target.h"
 #include "adiv5.h"
 
+extern long cortexm_wait_timeout;
 /* Private peripheral bus base address */
 #define CORTEXM_PPB_BASE	0xE0000000
 
@@ -143,10 +144,12 @@
 #define CORTEXM_FPB_CTRL_KEY		(1 << 1)
 #define CORTEXM_FPB_CTRL_ENABLE		(1 << 0)
 
-/* Data Watchpoint and Trace Mask Register (DWT_MASKx) */
-#define CORTEXM_DWT_MASK_BYTE		(0 << 0)
-#define CORTEXM_DWT_MASK_HALFWORD	(1 << 0)
-#define CORTEXM_DWT_MASK_WORD		(3 << 0)
+/* Data Watchpoint and Trace Mask Register (DWT_MASKx)
+*  The value here is the number of address bits we mask out */
+#define CORTEXM_DWT_MASK_BYTE		(0)
+#define CORTEXM_DWT_MASK_HALFWORD	(1)
+#define CORTEXM_DWT_MASK_WORD		(2)
+#define CORTEXM_DWT_MASK_DWORD		(3)
 
 /* Data Watchpoint and Trace Function Register (DWT_FUNCTIONx) */
 #define CORTEXM_DWT_FUNC_MATCHED	(1 << 24)
@@ -167,14 +170,15 @@
 
 #define	CORTEXM_TOPT_INHIBIT_SRST (1 << 2)
 
-bool cortexm_probe(ADIv5_AP_t *ap);
+bool cortexm_probe(ADIv5_AP_t *ap, bool forced);
 ADIv5_AP_t *cortexm_ap(target *t);
 
 bool cortexm_attach(target *t);
 void cortexm_detach(target *t);
-void cortexm_halt_resume(target *t, bool step);
 int cortexm_run_stub(target *t, uint32_t loadaddr,
                      uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
+int cortexm_mem_write_sized(
+	target *t, target_addr dest, const void *src, size_t len, enum align align);
 
 #endif
 

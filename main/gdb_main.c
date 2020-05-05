@@ -25,6 +25,7 @@
  */
 
 #include "general.h"
+#include "ctype.h"
 #include "hex_utils.h"
 #include "gdb_if.h"
 #include "gdb_packet.h"
@@ -207,6 +208,36 @@ int gdb_main_loop(struct target_controller *tc, bool in_syscall)
 			}
 			break;
 			}
+
+		/* Optional GDB packet support */
+		case 'p': { /* Read single register */
+			ERROR_IF_NO_TARGET();
+			uint32_t reg;
+			sscanf(pbuf, "p%" SCNx32, &reg);
+			uint8_t val[8];
+			size_t s = target_reg_read(cur_target, reg, val, sizeof(val));
+			if (s > 0) {
+				gdb_putpacket(hexify(pbuf, val, s), s * 2);
+			} else {
+				gdb_putpacketz("EFF");
+			}
+			break;
+			}
+		case 'P': { /* Write single register */
+			ERROR_IF_NO_TARGET();
+			uint32_t reg;
+			int n;
+			sscanf(pbuf, "P%" SCNx32 "=%n", &reg, &n);
+			uint8_t val[strlen(&pbuf[n])/2];
+			unhexify(val, pbuf + n, sizeof(val));
+			if (target_reg_write(cur_target, reg, val, sizeof(val)) > 0) {
+				gdb_putpacketz("OK");
+			} else {
+				gdb_putpacketz("EFF");
+			}
+			break;
+			}
+
 		case 'F':	/* Semihosting call finished */
 			if (in_syscall) {
 				return hostio_reply(tc, pbuf, size);
@@ -216,7 +247,6 @@ int gdb_main_loop(struct target_controller *tc, bool in_syscall)
 			}
 			break;
 
-		/* Optional GDB packet support */
 		case '!':	/* Enable Extended GDB Protocol. */
 			/* This doesn't do anything, we support the extended
 			 * protocol anyway, but GDB will never send us a 'R'
@@ -227,8 +257,10 @@ int gdb_main_loop(struct target_controller *tc, bool in_syscall)
 
 		case 0x04:
 		case 'D':	/* GDB 'detach' command. */
-			if(cur_target)
+			if(cur_target) {
+				SET_RUN_STATE(1);
 				target_detach(cur_target);
+			}
 			last_target = cur_target;
 			cur_target = NULL;
 			gdb_putpacketz("OK");
@@ -398,9 +430,37 @@ handle_v_packet(char *packet, int plen)
 		else
 			gdb_putpacketz("E01");
 
-	} else if (!strcmp(packet, "vRun;")) {
+	} else if (!strncmp(packet, "vRun", 4)) {
+		/* Parse command line for get_cmdline semihosting call */
+		char cmdline[83];
+		char *pbuf = cmdline;
+		char *tok = packet + 4;
+		if (*tok == ';') tok++;
+		*cmdline='\0';
+		while(*tok != '\0') {
+			if(strlen(cmdline)+3 >= sizeof(cmdline)) break;
+			if (*tok == ';') {
+				*pbuf++=' ';
+				*pbuf='\0';
+				tok++;
+				continue;
+			}
+			if (isxdigit(*tok) && isxdigit(*(tok+1))) {
+				unhexify(pbuf, tok, 2);
+				if ((*pbuf == ' ') || (*pbuf == '\\')) {
+					*(pbuf+1)=*pbuf;
+					*pbuf++='\\';
+				}
+				pbuf++;
+				tok+=2;
+				*pbuf='\0';
+				continue;
+			}
+			break;
+		}
 		/* Run target program. For us (embedded) this means reset. */
 		if(cur_target) {
+			target_set_cmdline(cur_target, cmdline);
 			target_reset(cur_target);
 			gdb_putpacketz("T05");
 		} else if(last_target) {
@@ -409,6 +469,7 @@ handle_v_packet(char *packet, int plen)
 
                         /* If we were able to attach to the target again */
                         if (cur_target) {
+				target_set_cmdline(cur_target, cmdline);
                         	target_reset(cur_target);
                         	gdb_putpacketz("T05");
                         } else	gdb_putpacketz("E01");
