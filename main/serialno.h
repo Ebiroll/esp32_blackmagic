@@ -17,10 +17,16 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef __SERIALNO_H
-#define __SERIALNO_H
 
-char *serialno_read(char *s);
+#ifndef INCLUDE_SERIALNO_H
+#define INCLUDE_SERIALNO_H
 
+#ifndef DFU_SERIAL_LENGTH
+#define DFU_SERIAL_LENGTH
 #endif
 
+extern char serial_no[DFU_SERIAL_LENGTH];
+
+void read_serial_number(void);
+
+#endif /* INCLUDE_SERIALNO_H */

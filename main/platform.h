@@ -39,34 +39,53 @@
 #include "driver/gpio.h"
 #include <freertos/FreeRTOS.h>
 
-#define BOARD_IDENT "Black Magic Probe (esp32), (Firmware 0.1)"
+#define BOARD_IDENT "Black Magic Probe (esp32), (Firmware 0.2)"
 
 #define TMS_SET_MODE() do { } while (0)
 
-#define TMS_PIN (17) // On wroover module, this is PSRAM clock
-#define TDI_PIN (13) // 
-#define TDO_PIN (14) // 
-#define TCK_PIN (12) // 
+#if 1
+// No ports on the ESP32
+#define TDI_PORT  0
+
+// https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/gpio.html
+
+#define TMS_PIN (8) // On wroover module, pin 17  is PSRAM clock
+#define TDI_PIN (11) // 
+#define TDO_PIN (9) // 
+#define TCK_PIN (10) // 
+#endif
+
+
+#define SWDIO_PIN  (8)
+//TMS_PIN
+#define SWCLK_PIN  (10)
+// TCK_PIN
+
+#define NRST_PORT 0
+#define NRST_PIN  (22)
+
+
+// On the ESP32 we dont have the PORTS (unlike stm32), this is dummy value to keep things similar as other platforms
+#define SWCLK_PORT  0
+#define SWDIO_PORT  0
+
 /* These are used for input JTAG on esp32
 2 	MTDO / GPIO15 	TDO
 3 	MTDI / GPIO12 	TDI
 4 	MTCK / GPIO13 	TCK
 5 	MTMS / GPIO14 	TMS
 */
+#define PLATFORM_IDENT "(ESP32S3)"
+#define PLATFORM_HAS_TRACESWO 1
+#define TRACESWO_PROTOCOL  2
 
-//#define PLATFORM_HAS_TRACESWO 1
-#define TRACESWO_PIN 13
+#define TRACESWO_PIN 7
 // Workaround for driver
-#define TRACESWO_DUMMY_TX 19
+#define TRACESWO_DUMMY_TX 6
 
-// ON ESP32 we dont have the PORTS (unlike stm32), this is dummy value to keep things similar as other platforms
-#define SWCLK_PORT  0
-#define SWDIO_PORT  0
-
-#define SWDIO_PIN (17)  // On wroover module, this is PSRAM clock
-#define SWCLK_PIN (23)
 
 #define gpio_set_val(port, pin, value) do {	\
+		if (pin>38) printf("__FUNCTION__%d",pin);  \
 		gpio_set_level(pin, value);		\
 		/*sdk_os_delay_us(2);	*/	\
 	} while (0);
@@ -90,5 +109,5 @@
 	} while (0)
 
 //#define PLATFORM_HAS_DEBUG 1
-//#define ENABLE_DEBUG 1
+#define ENABLE_DEBUG 1
 #endif

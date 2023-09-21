@@ -18,11 +18,26 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-typedef const struct jtag_dev_descr_s {
-	const uint32_t idcode;
-	const uint32_t idmask;
-	const char * const descr;
-	void (*const handler)(jtag_dev_t *dev);
-} jtag_dev_descr_t;
-extern jtag_dev_descr_t dev_descr[];
+#ifndef TARGET_JTAG_DEVS_H
+#define TARGET_JTAG_DEVS_H
 
+#include <stdint.h>
+
+typedef struct jtag_ir_quirks {
+	uint16_t ir_value;
+	uint8_t ir_length;
+} jtag_ir_quirks_s;
+
+typedef struct jtag_dev_descr {
+	uint32_t idcode;
+	uint32_t idmask;
+#ifdef ENABLE_DEBUG
+	const char *descr;
+#endif
+	void (*handler)(uint8_t jd_index);
+	jtag_ir_quirks_s ir_quirks;
+} jtag_dev_descr_s;
+
+extern const jtag_dev_descr_s dev_descr[];
+
+#endif /* TARGET_JTAG_DEVS_H */

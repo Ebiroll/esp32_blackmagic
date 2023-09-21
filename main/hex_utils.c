@@ -3,6 +3,8 @@
  *
  * Copyright (C) 2011  Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
+ * Copyright (C) 2023 1BitSquared <info@1bitsquared.com>
+ * Modified by Rachel Mant <git@dragonmux.network>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,45 +20,48 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* Convenience function to convert to/from ascii strings of hex digits.
- */
+/* Convenience functions to convert to/from ascii strings of hex digits. */
 
 #include "general.h"
 #include "hex_utils.h"
 
-static const char hexdigits[] = "0123456789abcdef";
-
-char * hexify(char *hex, const void *buf, size_t size)
+char hex_digit(const uint8_t value)
 {
-	char *tmp = hex;
-	const uint8_t *b = buf;
+	char digit = (char)value;
+	if (value > 9U)
+		digit += 'A' - '0' - 10U;
+	digit += '0';
+	return digit;
+}
 
-	while (size--) {
-		*tmp++ = hexdigits[*b >> 4];
-		*tmp++ = hexdigits[*b++ & 0xF];
+char *hexify(char *const hex, const void *const buf, const size_t size)
+{
+	char *dst = hex;
+	const uint8_t *const src = buf;
+
+	for (size_t idx = 0; idx < size; ++idx) {
+		*dst++ = hex_digit(src[idx] >> 4U);
+		*dst++ = hex_digit(src[idx] & 0xfU);
 	}
-	*tmp++ = 0;
+	*dst = 0;
 
 	return hex;
 }
 
-static uint8_t unhex_digit(char hex)
+uint8_t unhex_digit(const char hex)
 {
 	uint8_t tmp = hex - '0';
-	if(tmp > 9)
-		tmp -= 'A' - '0' - 10;
-	if(tmp > 16)
+	if (tmp > 9U)
+		tmp -= 'A' - '0' - 10U;
+	if (tmp > 16U)
 		tmp -= 'a' - 'A';
 	return tmp;
 }
 
-char * unhexify(void *buf, const char *hex, size_t size)
+char *unhexify(void *const buf, const char *hex, const size_t size)
 {
-	uint8_t *b = buf;
-	while (size--) {
-		*b = unhex_digit(*hex++) << 4;
-		*b++ |= unhex_digit(*hex++);
-	}
+	uint8_t *const dst = buf;
+	for (size_t idx = 0; idx < size; ++idx, hex += 2U)
+		dst[idx] = (unhex_digit(hex[0]) << 4U) | unhex_digit(hex[1]);
 	return buf;
 }
-

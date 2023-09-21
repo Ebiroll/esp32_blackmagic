@@ -40,6 +40,13 @@
 #include "general.h"
 #include "gdb_if.h"
 
+extern target_s *cur_target;
+
+
+#define DEBUG_INFO(...) printf(__VA_ARGS__)
+//#define DEBUG_WARN(...)  PLATFORM_PRINTF(__VA_ARGS__)
+#define DEBUG(...)  printf(__VA_ARGS__)
+
 static int gdb_if_serv, gdb_if_conn;
 
 void set_gdb_socket(int socket) 
@@ -74,7 +81,7 @@ int gdb_if_init(void)
 	assert(bind(gdb_if_serv, (void*)&addr, sizeof(addr)) != -1);
 	assert(listen(gdb_if_serv, 1) != -1);
 
-	DEBUG("Listening on TCP:2000\n");
+	DEBUG_INFO("Listening on TCP:2345\n");
 
 	return 0;
 }
@@ -88,12 +95,23 @@ unsigned char gdb_if_getchar(void)
 	while(i <= 0) {
 		if(gdb_if_conn <= 0) {
 			gdb_if_conn = accept(gdb_if_serv, NULL, NULL);
-			DEBUG("Got connection\n");
+			DEBUG_INFO("Got connection again\n");
+			int retries=5;
+
+			target_addr_t watch;
+	        target_halt_reason_e reason = target_halt_poll(cur_target, &watch);
+	        while (!reason && retries-->0) {
+                reason = target_halt_poll(cur_target, &watch);
+            }
+            gdb_poll_target();
 		}
 		i = recv(gdb_if_conn, (void*)&ret, 1, 0);
 		if(i <= 0) {
 			gdb_if_conn = -1;
-			DEBUG("Dropped broken connection\n");
+			DEBUG_INFO("Dropped broken connection\n");
+			// TODO!!! 
+			if (cur_target)
+				target_detach(cur_target);
 			/* Return '+' in case we were waiting for an ACK */
 			return '+';
 		}
@@ -101,7 +119,7 @@ unsigned char gdb_if_getchar(void)
 	return ret;
 }
 
-unsigned char gdb_if_getchar_to(int timeout)
+unsigned char gdb_if_getchar_to(uint32_t timeout)
 {
 	fd_set fds;
 	struct timeval tv;
@@ -117,16 +135,19 @@ unsigned char gdb_if_getchar_to(int timeout)
 	if(select(gdb_if_conn+1, &fds, NULL, NULL, &tv) > 0)
 		return gdb_if_getchar();
 
-	return -1;
+	return 0;
 }
 
-void gdb_if_putchar(unsigned char c, int flush)
+static uint8_t buf[2048];
+static int bufsize = 0;
+
+void gdb_if_putchar(char c, int flush)
 {
-	static uint8_t buf[2048];
-	static int bufsize = 0;
 	if (gdb_if_conn > 0) {
 		buf[bufsize++] = c;
 		if (flush || (bufsize == sizeof(buf))) {
+			buf[bufsize]=0;
+			//printf("%s\n",buf);
 			send(gdb_if_conn, buf, bufsize, 0);
 			bufsize = 0;
 		}

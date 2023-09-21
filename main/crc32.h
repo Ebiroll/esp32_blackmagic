@@ -18,9 +18,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __CRC32_H
-#define __CRC32_H
+#ifndef INCLUDE_CRC32_H
+#define INCLUDE_CRC32_H
 
-uint32_t generic_crc32(target *t, uint32_t base, int len);
+#include <stdint.h>
+#include <target.h>
 
-#endif
+bool generic_crc32(target_s *target, uint32_t *crc, uint32_t base, size_t len);
+
+#endif /* INCLUDE_CRC32_H */

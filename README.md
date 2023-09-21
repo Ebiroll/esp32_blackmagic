@@ -6,6 +6,22 @@ It provides a wifi based, debug probe for ARM i.e. ST32L1 cortex processors
 https://github.com/markrages/blackmagic/tree/a1d5386ce43189f0ac23300bea9b4d9f26869ffb/src/platforms/esp8266
 
 
+# Changes
+ I merged JTAG support for riscv-esp32c3 however this is not tested.
+
+ If you connect an STM32 board and put it in boot mode, then you might be able to query some information 
+ with uart_scan.
+
+
+# Platform IO
+The latest changes are tested with ESP32-C3
+
+I also managed to build with an esp32-S3
+
+Yhen I had to preform a workaround,
+board = esp32s3-qio
+
+
 # Up to date BMP
 This repository is not updated with latest changes in BMP
 This other repository contains the latest version of BMP source https://github.com/Ebiroll/blackmagic
@@ -20,7 +36,7 @@ In order to build this repository in linux, do.
       > build-esp32.sh
       #Upload the
 ```
-
+However espressif might have changed this behaviour and it is might not be possible.
 
 
 # Status
@@ -96,7 +112,7 @@ https://github.com/orbcode/orbuculum
 
 To start trace thead, do
 ```
-(gdb) monitor traceswo
+(gdb) monitor traceswo 9600
 ```
 
 

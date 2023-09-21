@@ -17,14 +17,24 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef __TIMING_H
-#define __TIMING_H
+
+#ifndef INCLUDE_TIMING_H
+#define INCLUDE_TIMING_H
+
+#include <stdint.h>
+
+#if !defined(SYSTICKHZ)
+#define SYSTICKHZ 1000U
+#endif
+
+#define SYSTICKMS (1000U / SYSTICKHZ)
+#define MORSECNT  ((SYSTICKHZ / 10U) - 1U)
 
 struct platform_timeout {
 	uint32_t time;
 };
 
+extern uint32_t target_clk_divider;
 uint32_t platform_time_ms(void);
 
-#endif /* __TIMING_H */
-
+#endif /* INCLUDE_TIMING_H */

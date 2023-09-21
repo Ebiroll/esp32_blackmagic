@@ -17,31 +17,57 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __PLATFORM_SUPPORT_H
-#define __PLATFORM_SUPPORT_H
+#ifndef INCLUDE_PLATFORM_SUPPORT_H
+#define INCLUDE_PLATFORM_SUPPORT_H
 
-#ifndef __GENERAL_H
-#	error "Include 'general.h' instead"
+#ifndef INCLUDE_GENERAL_H
+#error "Include 'general.h' instead"
 #endif
 
-#if defined(LIBFTDI)
+#if PC_HOSTED == 0
+#include "stdio_newlib.h"
+#endif
+#include "target.h"
+#include "spi_types.h"
+
+#if PC_HOSTED == 1
 void platform_init(int argc, char **argv);
+void platform_pace_poll(void);
 #else
 void platform_init(void);
+
+inline void platform_pace_poll(void)
+{
+}
 #endif
 
-typedef struct platform_timeout platform_timeout;
-void platform_timeout_set(platform_timeout *t, uint32_t ms);
-bool platform_timeout_is_expired(platform_timeout *t);
+typedef struct platform_timeout platform_timeout_s;
+void platform_timeout_set(platform_timeout_s *target, uint32_t ms);
+bool platform_timeout_is_expired(const platform_timeout_s *target);
 void platform_delay(uint32_t ms);
 
+#define POWER_CONFLICT_THRESHOLD 5U /* in 0.1V, so 5 stands for 0.5V */
+
+extern bool connect_assert_nrst;
+uint32_t platform_target_voltage_sense(void);
 const char *platform_target_voltage(void);
 int platform_hwversion(void);
-void platform_srst_set_val(bool assert);
-bool platform_srst_get_val(void);
+void platform_nrst_set_val(bool assert);
+bool platform_nrst_get_val(void);
 bool platform_target_get_power(void);
-void platform_target_set_power(bool power);
+bool platform_target_set_power(bool power);
 void platform_request_boot(void);
+void platform_max_frequency_set(uint32_t frequency);
+uint32_t platform_max_frequency_get(void);
 
+void platform_target_clk_output_enable(bool enable);
+
+#if PC_HOSTED == 0
+bool platform_spi_init(spi_bus_e bus);
+bool platform_spi_deinit(spi_bus_e bus);
+
+bool platform_spi_chip_select(uint8_t device_select);
+uint8_t platform_spi_xfer(spi_bus_e bus, uint8_t value);
 #endif
 
+#endif /* INCLUDE_PLATFORM_SUPPORT_H */

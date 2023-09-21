@@ -21,44 +21,44 @@
 /* This file provides generic forms of the low-level jtagtap functions
  * for platforms that don't require optimised forms.
  */
-#if 0
 #include "general.h"
 #include "jtagtap.h"
 
-void jtagtap_tms_seq(uint32_t MS, int ticks)
+void jtagtap_tms_seq(const uint32_t tms_states, const size_t clock_cycles)
 {
-	while(ticks--) {
-		jtagtap_next(MS & 1, 1);
-		MS >>= 1;
+	for (size_t cycle = 0; cycle < clock_cycles; ++cycle) {
+		const bool tms = (tms_states >> cycle) & 1U;
+		jtag_proc.jtagtap_next(tms, true);
 	}
 }
 
-void jtagtap_tdi_tdo_seq(uint8_t *DO, const uint8_t final_tms, const uint8_t *DI, int ticks)
+void jtagtap_tdi_tdo_seq(
+	uint8_t *const data_out, const uint8_t final_tms, const uint8_t *const data_in, const size_t clock_cycles)
 {
-	uint8_t index = 1;
-	while(ticks--) {
-		if(jtagtap_next(ticks?0:final_tms, *DI & index)) {
-			*DO |= index;
-		} else {
-			*DO &= ~index;
-		}
-		if(!(index <<= 1)) {
-			index = 1;
-			DI++; DO++;
-		}
-	}
-}
+	uint8_t value = 0;
+	for (size_t cycle = 0; cycle < clock_cycles; ++cycle) {
+		const size_t bit = cycle & 7U;
+		const size_t byte = cycle >> 3U;
+		const bool tms = cycle + 1U >= clock_cycles && final_tms;
+		const bool tdi = data_in[byte] & (1U << bit);
 
-void jtagtap_tdi_seq(const uint8_t final_tms, const uint8_t *DI, int ticks)
-{
-	uint8_t index = 1;
-	while(ticks--) {
-		jtagtap_next(ticks?0:final_tms, *DI & index);
-		if(!(index <<= 1)) {
-			index = 1;
-			DI++;
+		if (jtag_proc.jtagtap_next(tms, tdi))
+			value |= 1U << bit;
+
+		if (bit == 7U) {
+			data_out[byte] = value;
+			value = 0;
 		}
 	}
 }
 
-#endif
+void jtagtap_tdi_seq(const uint8_t final_tms, const uint8_t *const data_in, const size_t clock_cycles)
+{
+	for (size_t cycle = 0; cycle < clock_cycles; ++cycle) {
+		const size_t bit = cycle & 7U;
+		const size_t byte = cycle >> 3U;
+		const bool tms = cycle + 1U >= clock_cycles && final_tms;
+		const bool tdi = data_in[byte] & (1U << bit);
+		jtag_proc.jtagtap_next(tms, tdi);
+	}
+}

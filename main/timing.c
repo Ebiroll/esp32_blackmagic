@@ -17,15 +17,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 #include "general.h"
 
-void platform_timeout_set(platform_timeout *t, uint32_t ms)
+void platform_timeout_set(platform_timeout_s *const t, uint32_t ms)
 {
+	if (ms < SYSTICKMS)
+		ms = SYSTICKMS;
 	t->time = platform_time_ms() + ms;
 }
 
-bool platform_timeout_is_expired(platform_timeout *t)
+bool platform_timeout_is_expired(const platform_timeout_s *const t)
 {
 	return platform_time_ms() > t->time;
 }
-

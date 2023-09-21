@@ -3,6 +3,8 @@
  *
  * Copyright (C) 2011  Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
+ * Copyright (C) 2022-2023 1BitSquared <info@1bitsquared.com>
+ * Modified by Rachel Mant <git@dragonmux.network>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,37 +20,34 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __JTAG_SCAN_H
-#define __JTAG_SCAN_H
+#ifndef TARGET_JTAG_SCAN_H
+#define TARGET_JTAG_SCAN_H
 
-#define JTAG_MAX_DEVS	32
-#define JTAG_MAX_IR_LEN	16
+#include <stddef.h>
+#include "jtagtap.h"
 
-typedef struct jtag_dev_s {
-#if !defined(JTAG_HL)
-	union {
-		uint8_t dev;
-		uint8_t dr_prescan;
-	};
+#define JTAG_MAX_DEVS   32U
+#define JTAG_MAX_IR_LEN 16U
+
+typedef struct jtag_dev {
+	uint32_t jd_idcode;
+	uint32_t current_ir;
+
+	/* The DR prescan doubles as the device index */
+	uint8_t dr_prescan;
 	uint8_t dr_postscan;
 
 	uint8_t ir_len;
 	uint8_t ir_prescan;
 	uint8_t ir_postscan;
-#endif
-	uint32_t idcode;
-	const char *descr;
-#if !defined(JTAG_HL)
-	uint32_t current_ir;
-#endif
+} jtag_dev_s;
 
-} jtag_dev_t;
+extern jtag_dev_s jtag_devs[JTAG_MAX_DEVS];
+extern uint32_t jtag_dev_count;
+extern const uint8_t ones[8];
 
-extern struct jtag_dev_s jtag_devs[JTAG_MAX_DEVS+1];
-extern int jtag_dev_count;
+void jtag_dev_write_ir(uint8_t jd_index, uint32_t ir);
+void jtag_dev_shift_dr(uint8_t jd_index, uint8_t *dout, const uint8_t *din, size_t ticks);
+void jtag_add_device(uint32_t dev_index, const jtag_dev_s *jtag_dev);
 
-void jtag_dev_write_ir(jtag_dev_t *dev, uint32_t ir);
-void jtag_dev_shift_dr(jtag_dev_t *dev, uint8_t *dout, const uint8_t *din, int ticks);
-
-#endif
-
+#endif /* TARGET_JTAG_SCAN_H */

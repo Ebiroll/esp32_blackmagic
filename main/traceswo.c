@@ -137,24 +137,100 @@ static void routeTask(void *inpar) {
             printf("2 bytes received %d\n",data[0]);
       }
       if (size == 3) {
-            printf("%c",data[2]);
+            printf("%c%c%c",data[0],data[1],data[2]);
             //printf("3\n");
       }
+      data[size]=0;
+      gdb_outf("%s",data);
       // Keep watchdog happy
-      TIMERG0.wdt_wprotect=TIMG_WDT_WKEY_VALUE;
-      TIMERG0.wdt_feed=1;
-      TIMERG0.wdt_wprotect=0;
+      timg_wdtfeed_reg_t feed_me;
+      timg_wdtwprotect_reg_t protect_me;
+      protect_me.val=1356348065;
+      feed_me.val=1;
+      //protect_me.val=TIMG_WDT_WKEY_VALUE;
+      TIMERG0.wdtwprotect=protect_me;
+      TIMERG0.wdtfeed=feed_me;
+      protect_me.val=0;
+      TIMERG0.wdtwprotect=protect_me;
   }
 }
 
+static int task_started=0;
 
-void traceswo_init(int baudrate) {
+
+
+#define OUTPUT_PIN_SEL  (1<<9)
+
+// Test of pin capabilities
+void pins_test() {
+    int times=20;
+
+    gpio_config_t io_conf;
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO15/17
+    io_conf.pin_bit_mask = OUTPUT_PIN_SEL;
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+
+    //io_conf.mode GPIO_PULLUP_ONLY
+    //disable pull-up mode
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+
+    gpio_set_pull_mode(9, GPIO_PULLUP_ONLY);
+    gpio_drive_cap_t strength=GPIO_DRIVE_CAP_DEFAULT;
+    gpio_get_drive_capability(8, &strength);
+
+/////  
+    if (task_started) {
+        //pins_test();
+        gpio_set_direction(8, GPIO_MODE_OUTPUT);
+        ESP_LOGI(TAG, "Toggling pin 8 %d...", times);
+        while(times-->0) {
+
+#if 0
+            esp_err_t ret=gpio_set_level(9,1);
+            if (ret!=ESP_OK) {
+                ESP_LOGI(TAG, "Err setting 15 %d...", ret);
+            }
+            gpio_set_level(6,0);
+            gpio_set_level(7,0);
+
+            vTaskDelayMs(100);
+            ret=gpio_set_level(9,0);
+            if (ret!=ESP_OK) {
+                ESP_LOGI(TAG, "Err resetting pin 15 %d...", ret);
+            }
+            gpio_set_level(16,6);
+            gpio_set_level(14,7);
+#endif
+            vTaskDelayMs(100);       
+         }
+    }
+
+
+}
+
+#define vTaskDelayMs(ms)	vTaskDelay((ms)/portTICK_PERIOD_MS)
+
+void traceswo_init(uint32_t baudrate, uint32_t swo_chan_bitmask) {
+
+    if (task_started) {
+
+        ESP_LOGI(TAG, "Trace already started...");
+        return;
+    }
 
     if (baudrate>0) {
         g_baudrate=baudrate;       
     }
     strcpy(serial_no,"esp32");
 
+    task_started = 1;
     xTaskCreate(&routeTask, "swo_thread", 4*4096, NULL, 8, NULL);
 
 }

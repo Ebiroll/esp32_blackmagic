@@ -18,18 +18,19 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __GDB_IF_H
-#define __GDB_IF_H
+#ifndef INCLUDE_GDB_IF_H
+#define INCLUDE_GDB_IF_H
 
-#if !defined(LIBFTDI)
-//#include <libopencm3/usb/usbd.h>
-//void gdb_usb_out_cb(usbd_device *dev, uint8_t ep);
+#if PC_HOSTED == 0
+#include <libopencm3/usb/usbd.h>
+void gdb_usb_out_cb(usbd_device *dev, uint8_t ep);
 #endif
 
 int gdb_if_init(void);
 unsigned char gdb_if_getchar(void);
-unsigned char gdb_if_getchar_to(int timeout);
-void gdb_if_putchar(unsigned char c, int flush);
+unsigned char gdb_if_getchar_to(uint32_t timeout);
 
-#endif
+/* sending gdb_if_putchar(0, true) seems to work as keep alive */
+void gdb_if_putchar(char c, int flush);
 
+#endif /* INCLUDE_GDB_IF_H */

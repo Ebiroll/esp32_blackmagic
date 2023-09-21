@@ -17,13 +17,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef __STUB_H
-#define __STUB_H
 
-//static inline void __attribute__((always_inline))
- inline void stub_exit(const int code)
+#ifndef TARGET_FLASHSTUB_STUB_H
+#define TARGET_FLASHSTUB_STUB_H
+
+static inline void __attribute__((always_inline)) stub_exit(const int code)
 {
-	//asm("bkpt %0"::"i"(code));
+	//__asm__("bkpt %0" ::"i"(code));
+	// be00
+	// .opcode = 0xBE00
 }
-#endif
 
+#endif /* TARGET_FLASHSTUB_STUB_H */
