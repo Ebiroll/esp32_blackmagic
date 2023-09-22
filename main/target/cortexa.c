@@ -60,8 +60,6 @@ static int cortexa_breakwatch_set(target_s *t, breakwatch_s *);
 static int cortexa_breakwatch_clear(target_s *t, breakwatch_s *);
 static uint32_t bp_bas(uint32_t addr, uint8_t len);
 
-static void apb_write(target_s *t, uint16_t reg, uint32_t val);
-static uint32_t apb_read(target_s *t, uint16_t reg);
 static void write_gpreg(target_s *t, uint8_t regno, uint32_t val);
 static uint32_t read_gpreg(target_s *t, uint8_t regno);
 
@@ -81,48 +79,50 @@ typedef struct cortexa_priv {
 	bool mmu_fault;
 } cortexa_priv_s;
 
-#define CORTEXAR_DBG_IDR 0x000U
-#define CORTEXAR_DBG_DVR 0x100U
-#define CORTEXAR_DBG_DCR 0x140U
-#define CORTEXAR_DBG_WVR 0x180U
-#define CORTEXAR_DBG_WCR 0x1c0U
-#define CORTEXAR_CTR     0xd04U
+#define CORTEXAR_DBG_IDR   0x000U
+#define CORTEXAR_DBG_DTRTX 0x080U /* DBGDTRRXext */
+#define CORTEXAR_DBG_ITR   0x084U
+#define CORTEXAR_DBG_DSCR  0x088U
+#define CORTEXAR_DBG_DTRRX 0x08cU /* DBGDTRTXext */
+#define CORTEXAR_DBG_DRCR  0x090U
+#define CORTEXAR_DBG_BVR   0x100U
+#define CORTEXAR_DBG_BCR   0x140U
+#define CORTEXAR_DBG_WVR   0x180U
+#define CORTEXAR_DBG_WCR   0x1c0U
+#define CORTEXAR_CTR       0xd04U
 
 #define CORTEXAR_DBG_IDR_BREAKPOINT_MASK  0xfU
 #define CORTEXAR_DBG_IDR_BREAKPOINT_SHIFT 24U
 #define CORTEXAR_DBG_IDR_WATCHPOINT_MASK  0xfU
 #define CORTEXAR_DBG_IDR_WATCHPOINT_SHIFT 28U
 
-#define DBGDTRRX 32U /* DCC: Host to target */
-#define DBGITR   33U
+#define CORTEXAR_DBG_DSCR_HALTED           (1U << 0U)
+#define CORTEXAR_DBG_DSCR_RESTARTED        (1U << 1U)
+#define CORTEXAR_DBG_DSCR_MOE_MASK         0x0000003cU
+#define CORTEXAR_DBG_DSCR_MOE_HALT_REQUEST 0x00000000U
+#define CORTEXAR_DBG_DSCR_MOE_BREAKPOINT   0x00000004U
+#define CORTEXAR_DBG_DSCR_MOE_ASYNC_WATCH  0x00000008U
+#define CORTEXAR_DBG_DSCR_MOE_BKPT_INSN    0x0000000cU
+#define CORTEXAR_DBG_DSCR_MOE_EXTERNAL_DBG 0x00000010U
+#define CORTEXAR_DBG_DSCR_MOE_VEC_CATCH    0x00000014U
+#define CORTEXAR_DBG_DSCR_MOE_SYNC_WATCH   0x00000028U
+#define CORTEXAR_DBG_DSCR_ITR_ENABLE       (1U << 13U)
+#define CORTEXAR_DBG_DSCR_HALT_DBG_ENABLE  (1U << 14U)
+#define CORTEXAR_DBG_DSCR_INSN_COMPLETE    (1U << 24U)
+#define CORTEXAR_DBG_DSCR_DTR_READ_READY   (1U << 29U)
+#define CORTEXAR_DBG_DSCR_DTR_WRITE_DONE   (1U << 30U)
 
-#define DBGDSCR                  34U
-#define DBGDSCR_TXFULL           (1U << 29U)
-#define DBGDSCR_INSTRCOMPL       (1U << 24U)
 #define DBGDSCR_EXTDCCMODE_STALL (1U << 20U)
 #define DBGDSCR_EXTDCCMODE_FAST  (2U << 20U)
 #define DBGDSCR_EXTDCCMODE_MASK  (3U << 20U)
-#define DBGDSCR_HDBGEN           (1U << 14U)
-#define DBGDSCR_ITREN            (1U << 13U)
 #define DBGDSCR_INTDIS           (1U << 11U)
 #define DBGDSCR_UND_I            (1U << 8U)
 #define DBGDSCR_SDABORT_L        (1U << 6U)
-#define DBGDSCR_MOE_MASK         (0xfU << 2U)
-#define DBGDSCR_MOE_HALT_REQ     (0x0U << 2U)
-#define DBGDSCR_MOE_WATCH_ASYNC  (0x2U << 2U)
-#define DBGDSCR_MOE_WATCH_SYNC   (0xaU << 2U)
-#define DBGDSCR_RESTARTED        (1U << 1U)
-#define DBGDSCR_HALTED           (1U << 0U)
 
-#define DBGDTRTX 35U /* DCC: Target to host */
-
-#define DBGDRCR     36U
 #define DBGDRCR_CSE (1U << 2U)
 #define DBGDRCR_RRQ (1U << 1U)
 #define DBGDRCR_HRQ (1U << 0U)
 
-#define DBGBVR(i)            (64U + (i))
-#define DBGBCR(i)            (80U + (i))
 #define DBGBCR_INST_MISMATCH (4U << 20U)
 #define DBGBCR_BAS_ANY       (0xfU << 5U)
 #define DBGBCR_BAS_LOW_HW    (0x3U << 5U)
@@ -130,8 +130,6 @@ typedef struct cortexa_priv {
 #define DBGBCR_EN            (1U << 0U)
 #define DBGBCR_PMC_ANY       (0x3U << 1U) /* 0b11 */
 
-#define DBGWVR(i)           (96U + (i))
-#define DBGWCR(i)           (112U + (i))
 #define DBGWCR_LSC_LOAD     (0x1U << 3U) /* 0b01 */
 #define DBGWCR_LSC_STORE    (0x2U << 3U) /* 0b10 */
 #define DBGWCR_LSC_ANY      (0x3U << 3U) /* 0b11U */
@@ -319,31 +317,49 @@ static size_t create_tdesc_cortex_a(char *buffer, size_t max_len)
 	return (size_t)total;
 }
 
-static void apb_write(target_s *t, uint16_t reg, uint32_t val)
+static void cortexar_run_insn(target_s *const target, const uint32_t insn)
 {
-	cortexa_priv_s *priv = t->priv;
-	adiv5_access_port_s *ap = priv->base.ap;
-	uint32_t addr = priv->base.base_addr + 4U * reg;
-	adiv5_ap_write(ap, ADIV5_AP_TAR, addr);
-	adiv5_dp_low_access(ap->dp, ADIV5_LOW_WRITE, ADIV5_AP_DRW, val);
+	/* Issue the requested instruction to the core */
+	cortex_dbg_write32(target, CORTEXAR_DBG_ITR, insn);
+	/* Poll for the instruction to complete */
+	while (!(cortex_dbg_read32(target, CORTEXAR_DBG_DSCR) & CORTEXAR_DBG_DSCR_INSN_COMPLETE))
+		continue;
 }
 
-static uint32_t apb_read(target_s *t, uint16_t reg)
+static uint32_t cortexar_run_read_insn(target_s *const target, const uint32_t insn)
 {
-	cortexa_priv_s *priv = t->priv;
-	adiv5_access_port_s *ap = priv->base.ap;
-	uint32_t addr = priv->base.base_addr + 4U * reg;
-	adiv5_ap_write(ap, ADIV5_AP_TAR, addr);
-	adiv5_dp_low_access(ap->dp, ADIV5_LOW_READ, ADIV5_AP_DRW, 0);
-	return adiv5_dp_low_access(ap->dp, ADIV5_LOW_READ, ADIV5_DP_RDBUFF, 0);
+	/* Issue the requested instruction to the core */
+	cortex_dbg_write32(target, CORTEXAR_DBG_ITR, insn);
+	/* Poll for the instruction to complete and the data to become ready in the DTR */
+	while ((cortex_dbg_read32(target, CORTEXAR_DBG_DSCR) &
+			   (CORTEXAR_DBG_DSCR_INSN_COMPLETE | CORTEXAR_DBG_DSCR_DTR_READ_READY)) !=
+		(CORTEXAR_DBG_DSCR_INSN_COMPLETE | CORTEXAR_DBG_DSCR_DTR_READ_READY))
+		continue;
+	/* Read back the DTR to complete the read */
+	return cortex_dbg_read32(target, CORTEXAR_DBG_DTRRX);
+}
+
+static void cortexar_run_write_insn(target_s *const target, const uint32_t insn, const uint32_t data)
+{
+	/* Set up the data in the DTR for the transaction */
+	cortex_dbg_write32(target, CORTEXAR_DBG_DTRTX, data);
+	/* Poll for the data to become ready in the DTR */
+	while (!(cortex_dbg_read32(target, CORTEXAR_DBG_DSCR) & CORTEXAR_DBG_DSCR_DTR_WRITE_DONE))
+		continue;
+	/* Issue the requested instruction to the core */
+	cortex_dbg_write32(target, CORTEXAR_DBG_ITR, insn);
+	/* Poll for the instruction to complete and the data to be consumed from the DTR */
+	while ((cortex_dbg_read32(target, CORTEXAR_DBG_DSCR) &
+			   (CORTEXAR_DBG_DSCR_INSN_COMPLETE | CORTEXAR_DBG_DSCR_DTR_WRITE_DONE)) != CORTEXAR_DBG_DSCR_INSN_COMPLETE)
+		continue;
 }
 
 static uint32_t va_to_pa(target_s *t, uint32_t va)
 {
 	cortexa_priv_s *priv = t->priv;
 	write_gpreg(t, 0, va);
-	apb_write(t, DBGITR, MCR | ATS1CPR);
-	apb_write(t, DBGITR, MRC | PAR);
+	cortexar_run_insn(t, MCR | ATS1CPR);
+	cortexar_run_insn(t, MRC | PAR);
 	uint32_t par = read_gpreg(t, 0);
 	if (par & 1U)
 		priv->mmu_fault = true;
@@ -362,32 +378,33 @@ static void cortexa_slow_mem_read(target_s *t, void *dest, target_addr_t src, si
 	write_gpreg(t, 0, src & ~3);
 
 	/* Switch to fast DCC mode */
-	uint32_t dbgdscr = apb_read(t, DBGDSCR);
+	uint32_t dbgdscr = cortex_dbg_read32(t, CORTEXAR_DBG_DSCR);
 	dbgdscr = (dbgdscr & ~DBGDSCR_EXTDCCMODE_MASK) | DBGDSCR_EXTDCCMODE_FAST;
-	apb_write(t, DBGDSCR, dbgdscr);
+	cortex_dbg_write32(t, CORTEXAR_DBG_DSCR, dbgdscr);
 
-	apb_write(t, DBGITR, 0xecb05e01); /* ldc 14, cr5, [r0], #4 */
-	/* According to the ARMv7-A ARM, in fast mode, the first read from
-	 * DBGDTRTX is  supposed to block until the instruction is complete,
-	 * but we see the first read returns junk, so it's read here and
-	 * ignored. */
-	apb_read(t, DBGDTRTX);
+	cortex_dbg_write32(t, CORTEXAR_DBG_ITR, 0xecb05e01); /* ldc 14, cr5, [r0], #4 */
+	/*
+	 * According to the ARMv7-AR ARM, in fast mode, the first read from
+	 * DBGDTRTXext (CORTEXAR_DBG_DTRRX) is supposed to block until the instruction
+	 * is complete, but we see the first read returns junk, so it's read here and ignored.
+	 */
+	cortex_dbg_read32(t, CORTEXAR_DBG_DTRRX);
 
 	for (unsigned i = 0; i < words; i++)
-		dest32[i] = apb_read(t, DBGDTRTX);
+		dest32[i] = cortex_dbg_read32(t, CORTEXAR_DBG_DTRRX);
 
 	memcpy(dest, (uint8_t *)dest32 + (src & 3U), len);
 
-	/* Switch back to stalling DCC mode */
-	dbgdscr = (dbgdscr & ~DBGDSCR_EXTDCCMODE_MASK) | DBGDSCR_EXTDCCMODE_STALL;
-	apb_write(t, DBGDSCR, dbgdscr);
+	/* Switch back to non-blocking DCC mode */
+	dbgdscr = (dbgdscr & ~DBGDSCR_EXTDCCMODE_MASK);
+	cortex_dbg_write32(t, CORTEXAR_DBG_DSCR, dbgdscr);
 
-	if (apb_read(t, DBGDSCR) & DBGDSCR_SDABORT_L) {
+	if (cortex_dbg_read32(t, CORTEXAR_DBG_DSCR) & DBGDSCR_SDABORT_L) {
 		/* Memory access aborted, flag a fault */
-		apb_write(t, DBGDRCR, DBGDRCR_CSE);
+		cortex_dbg_write32(t, CORTEXAR_DBG_DRCR, DBGDRCR_CSE);
 		priv->mmu_fault = true;
 	} else {
-		apb_read(t, DBGDTRTX);
+		cortex_dbg_read32(t, CORTEXAR_DBG_DTRRX);
 	}
 }
 
@@ -400,10 +417,10 @@ static void cortexa_slow_mem_write_bytes(target_s *t, target_addr_t dest, const 
 
 	while (len--) {
 		write_gpreg(t, 0, *src++);
-		apb_write(t, DBGITR, 0xe4cd0001); /* strb r0, [sp], #1 */
-		if (apb_read(t, DBGDSCR) & DBGDSCR_SDABORT_L) {
+		cortex_dbg_write32(t, CORTEXAR_DBG_ITR, 0xe4cd0001); /* strb r0, [sp], #1 */
+		if (cortex_dbg_read32(t, CORTEXAR_DBG_DSCR) & DBGDSCR_SDABORT_L) {
 			/* Memory access aborted, flag a fault */
-			apb_write(t, DBGDRCR, DBGDRCR_CSE);
+			cortex_dbg_write32(t, CORTEXAR_DBG_DRCR, DBGDRCR_CSE);
 			priv->mmu_fault = true;
 			return;
 		}
@@ -425,22 +442,22 @@ static void cortexa_slow_mem_write(target_s *t, target_addr_t dest, const void *
 	const uint32_t *src32 = src;
 
 	/* Switch to fast DCC mode */
-	uint32_t dbgdscr = apb_read(t, DBGDSCR);
+	uint32_t dbgdscr = cortex_dbg_read32(t, CORTEXAR_DBG_DSCR);
 	dbgdscr = (dbgdscr & ~DBGDSCR_EXTDCCMODE_MASK) | DBGDSCR_EXTDCCMODE_FAST;
-	apb_write(t, DBGDSCR, dbgdscr);
+	cortex_dbg_write32(t, CORTEXAR_DBG_DSCR, dbgdscr);
 
-	apb_write(t, DBGITR, 0xeca05e01); /* stc 14, cr5, [r0], #4 */
+	cortex_dbg_write32(t, CORTEXAR_DBG_ITR, 0xeca05e01); /* stc 14, cr5, [r0], #4 */
 
 	for (; len; len -= 4U)
-		apb_write(t, DBGDTRRX, *src32++);
+		cortex_dbg_write32(t, CORTEXAR_DBG_DTRTX, *src32++);
 
-	/* Switch back to stalling DCC mode */
-	dbgdscr = (dbgdscr & ~DBGDSCR_EXTDCCMODE_MASK) | DBGDSCR_EXTDCCMODE_STALL;
-	apb_write(t, DBGDSCR, dbgdscr);
+	/* Switch back to non-blocking DCC mode */
+	dbgdscr &= ~DBGDSCR_EXTDCCMODE_MASK;
+	cortex_dbg_write32(t, CORTEXAR_DBG_DSCR, dbgdscr);
 
-	if (apb_read(t, DBGDSCR) & DBGDSCR_SDABORT_L) {
+	if (cortex_dbg_read32(t, CORTEXAR_DBG_DSCR) & DBGDSCR_SDABORT_L) {
 		/* Memory access aborted, flag a fault */
-		apb_write(t, DBGDRCR, DBGDRCR_CSE);
+		cortex_dbg_write32(t, CORTEXAR_DBG_DRCR, DBGDRCR_CSE);
 		priv->mmu_fault = true;
 	}
 }
@@ -491,9 +508,16 @@ bool cortexa_probe(adiv5_access_port_s *ap, target_addr_t base_address)
 	target->halt_poll = cortexa_halt_poll;
 	target->halt_resume = cortexa_halt_resume;
 
-	/* Set up APB CSW, we won't touch this again */
-	uint32_t csw = ap->csw | ADIV5_AP_CSW_SIZE_WORD;
-	adiv5_ap_write(ap, ADIV5_AP_CSW, csw);
+	/* Try to halt the target core */
+	target_halt_request(target);
+	platform_timeout_s timeout;
+	platform_timeout_set(&timeout, 250);
+	target_halt_reason_e reason = TARGET_HALT_RUNNING;
+	while (!platform_timeout_is_expired(&timeout) && reason == TARGET_HALT_RUNNING)
+		reason = target_halt_poll(target, NULL);
+	/* If we did not succeed, we must abort at this point. */
+	if (reason == TARGET_HALT_FAULT || reason == TARGET_HALT_ERROR)
+		return false;
 
 	cortex_read_cpuid(target);
 	/* The format of the debug identification register is described in DDI0406C §C11.11.15 pg2217 */
@@ -546,10 +570,10 @@ bool cortexa_attach(target_s *target)
 	target_check_error(target);
 
 	/* Enable halting debug mode */
-	uint32_t dbgdscr = apb_read(target, DBGDSCR);
-	dbgdscr |= DBGDSCR_HDBGEN | DBGDSCR_ITREN;
-	dbgdscr = (dbgdscr & ~DBGDSCR_EXTDCCMODE_MASK) | DBGDSCR_EXTDCCMODE_STALL;
-	apb_write(target, DBGDSCR, dbgdscr);
+	uint32_t dbgdscr = cortex_dbg_read32(target, CORTEXAR_DBG_DSCR);
+	dbgdscr |= CORTEXAR_DBG_DSCR_ITR_ENABLE | CORTEXAR_DBG_DSCR_ITR_ENABLE;
+	dbgdscr &= ~DBGDSCR_EXTDCCMODE_MASK;
+	cortex_dbg_write32(target, CORTEXAR_DBG_DSCR, dbgdscr);
 	DEBUG_INFO("DBGDSCR = 0x%08" PRIx32 "\n", dbgdscr);
 
 	target_halt_request(target);
@@ -562,8 +586,8 @@ bool cortexa_attach(target_s *target)
 	/* Clear any stale breakpoints */
 	priv->base.breakpoints_mask = 0U;
 	for (size_t i = 0; i <= priv->base.breakpoints_available; ++i) {
-		cortex_dbg_write32(target, CORTEXAR_DBG_DVR + (i << 2U), 0U);
-		cortex_dbg_write32(target, CORTEXAR_DBG_DCR + (i << 2U), 0U);
+		cortex_dbg_write32(target, CORTEXAR_DBG_BVR + (i << 2U), 0U);
+		cortex_dbg_write32(target, CORTEXAR_DBG_BCR + (i << 2U), 0U);
 	}
 	priv->bcr0 = 0;
 
@@ -578,49 +602,31 @@ void cortexa_detach(target_s *target)
 
 	/* Clear any stale breakpoints */
 	for (size_t i = 0; i <= priv->base.breakpoints_available; ++i) {
-		cortex_dbg_write32(target, CORTEXAR_DBG_DVR + (i << 2U), 0U);
-		cortex_dbg_write32(target, CORTEXAR_DBG_DCR + (i << 2U), 0U);
+		cortex_dbg_write32(target, CORTEXAR_DBG_BVR + (i << 2U), 0U);
+		cortex_dbg_write32(target, CORTEXAR_DBG_BCR + (i << 2U), 0U);
 	}
 
 	/* Restore any clobbered registers */
 	cortexa_regs_write_internal(target);
 	/* Invalidate cache */
-	apb_write(target, DBGITR, MCR | ICIALLU);
-
-	platform_timeout_s timeout;
-	platform_timeout_set(&timeout, 200);
-
-	/* Wait for instruction to complete */
-	uint32_t dbgdscr;
-	do {
-		dbgdscr = apb_read(target, DBGDSCR);
-	} while (!(dbgdscr & DBGDSCR_INSTRCOMPL) && !platform_timeout_is_expired(&timeout));
+	cortexar_run_insn(target, MCR | ICIALLU);
 
 	/* Disable halting debug mode */
-	dbgdscr &= ~(DBGDSCR_HDBGEN | DBGDSCR_ITREN);
-	apb_write(target, DBGDSCR, dbgdscr);
+	uint32_t dbgdscr = cortex_dbg_read32(target, CORTEXAR_DBG_DSCR);
+	dbgdscr &= ~(CORTEXAR_DBG_DSCR_HALT_DBG_ENABLE | CORTEXAR_DBG_DSCR_ITR_ENABLE);
+	cortex_dbg_write32(target, CORTEXAR_DBG_DSCR, dbgdscr);
 	/* Clear sticky error and resume */
-	apb_write(target, DBGDRCR, DBGDRCR_CSE | DBGDRCR_RRQ);
+	cortex_dbg_write32(target, CORTEXAR_DBG_DRCR, DBGDRCR_CSE | DBGDRCR_RRQ);
 }
 
-static uint32_t read_gpreg(target_s *t, uint8_t regno)
+static inline uint32_t read_gpreg(target_s *t, uint8_t regno)
 {
-	/* To read a register we use DBGITR to load an MCR instruction
-	 * that sends the value via DCC DBGDTRTX using the CP14 interface.
-	 */
-	uint32_t instr = MCR | DBGDTRTXint | ((regno & 0xfU) << 12U);
-	apb_write(t, DBGITR, instr);
-	/* Return value read from DCC channel */
-	return apb_read(t, DBGDTRTX);
+	return cortexar_run_read_insn(t, MCR | DBGDTRTXint | ((regno & 0xfU) << 12U));
 }
 
-static void write_gpreg(target_s *t, uint8_t regno, uint32_t val)
+static inline void write_gpreg(target_s *t, uint8_t regno, uint32_t val)
 {
-	/* Write value to DCC channel */
-	apb_write(t, DBGDTRRX, val);
-	/* Run instruction to load register */
-	uint32_t instr = MRC | DBGDTRRXint | ((regno & 0xfU) << 12U);
-	apb_write(t, DBGITR, instr);
+	cortexar_run_write_insn(t, MRC | DBGDTRRXint | ((regno & 0xfU) << 12U), val);
 }
 
 static void cortexa_regs_read(target_s *t, void *data)
@@ -682,18 +688,18 @@ static void cortexa_regs_read_internal(target_s *t)
 		priv->reg_cache.r[i] = read_gpreg(t, i);
 
 	/* Read PC, via r0.  MCR is UNPREDICTABLE for Rt = r15. */
-	apb_write(t, DBGITR, 0xe1a0000f); /* mov r0, pc */
+	cortexar_run_insn(t, 0xe1a0000f); /* mov r0, pc */
 	priv->reg_cache.r[15] = read_gpreg(t, 0);
 	/* Read CPSR */
-	apb_write(t, DBGITR, 0xe10f0000); /* mrs r0, CPSR */
+	cortexar_run_insn(t, 0xe10f0000); /* mrs r0, CPSR */
 	priv->reg_cache.cpsr = read_gpreg(t, 0);
 	/* Read FPSCR */
-	apb_write(t, DBGITR, 0xeef10a10); /* vmrs r0, fpscr */
+	cortexar_run_insn(t, 0xeef10a10); /* vmrs r0, fpscr */
 	priv->reg_cache.fpscr = read_gpreg(t, 0);
 	/* Read out VFP registers */
 	for (size_t i = 0; i < 16U; i++) {
 		/* Read D[i] to R0/R1 */
-		apb_write(t, DBGITR, 0xec510b10 | i); /* vmov r0, r1, d0 */
+		cortexar_run_insn(t, 0xec510b10 | i); /* vmov r0, r1, d0 */
 		priv->reg_cache.d[i] = ((uint64_t)read_gpreg(t, 1) << 32U) | read_gpreg(t, 0);
 	}
 	priv->reg_cache.r[15] -= (priv->reg_cache.cpsr & CPSR_THUMB) ? 4 : 8;
@@ -706,17 +712,17 @@ static void cortexa_regs_write_internal(target_s *t)
 	for (size_t i = 0; i < 16U; i++) {
 		write_gpreg(t, 1, priv->reg_cache.d[i] >> 32U);
 		write_gpreg(t, 0, priv->reg_cache.d[i]);
-		apb_write(t, DBGITR, 0xec410b10U | i); /* vmov d[i], r0, r1 */
+		cortexar_run_insn(t, 0xec410b10U | i); /* vmov d[i], r0, r1 */
 	}
 	/* Write back FPSCR */
 	write_gpreg(t, 0, priv->reg_cache.fpscr);
-	apb_write(t, DBGITR, 0xeee10a10); /* vmsr fpscr, r0 */
+	cortexar_run_insn(t, 0xeee10a10); /* vmsr fpscr, r0 */
 	/* Write back the CPSR */
 	write_gpreg(t, 0, priv->reg_cache.cpsr);
-	apb_write(t, DBGITR, 0xe12ff000); /* msr CPSR_fsxc, r0 */
+	cortexar_run_insn(t, 0xe12ff000); /* msr CPSR_fsxc, r0 */
 	/* Write back PC, via r0.  MRC clobbers CPSR instead */
 	write_gpreg(t, 0, priv->reg_cache.r[15] | ((priv->reg_cache.cpsr & CPSR_THUMB) ? 1 : 0));
-	apb_write(t, DBGITR, 0xe1a0f000); /* mov pc, r0 */
+	cortexar_run_insn(t, 0xe1a0f000); /* mov pc, r0 */
 	/* Finally the GP registers now that we're done using them */
 	for (size_t i = 0; i < 15U; i++)
 		write_gpreg(t, i, priv->reg_cache.r[i]);
@@ -758,7 +764,7 @@ static void cortexa_halt_request(target_s *t)
 {
 	volatile exception_s e;
 	TRY_CATCH (e, EXCEPTION_TIMEOUT) {
-		apb_write(t, DBGDRCR, DBGDRCR_HRQ);
+		cortex_dbg_write32(t, CORTEXAR_DBG_DRCR, DBGDRCR_HRQ);
 	}
 	if (e.type) {
 		tc_printf(t, "Timeout sending interrupt, is target in WFI?\n");
@@ -772,7 +778,7 @@ static target_halt_reason_e cortexa_halt_poll(target_s *t, target_addr_t *watch)
 	TRY_CATCH (e, EXCEPTION_ALL) {
 		/* If this times out because the target is in WFI then
 		 * the target is still running. */
-		dbgdscr = apb_read(t, DBGDSCR);
+		dbgdscr = cortex_dbg_read32(t, CORTEXAR_DBG_DSCR);
 	}
 	switch (e.type) {
 	case EXCEPTION_ERROR:
@@ -784,22 +790,22 @@ static target_halt_reason_e cortexa_halt_poll(target_s *t, target_addr_t *watch)
 		return TARGET_HALT_RUNNING;
 	}
 
-	if (!(dbgdscr & DBGDSCR_HALTED)) /* Not halted */
+	if (!(dbgdscr & CORTEXAR_DBG_DSCR_HALTED)) /* Not halted */
 		return TARGET_HALT_RUNNING;
 
 	DEBUG_INFO("%s: DBGDSCR = 0x%08" PRIx32 "\n", __func__, dbgdscr);
 	/* Reenable DBGITR */
-	dbgdscr |= DBGDSCR_ITREN;
-	apb_write(t, DBGDSCR, dbgdscr);
+	dbgdscr |= CORTEXAR_DBG_DSCR_ITR_ENABLE;
+	cortex_dbg_write32(t, CORTEXAR_DBG_DSCR, dbgdscr);
 
 	/* Find out why we halted */
 	target_halt_reason_e reason = TARGET_HALT_BREAKPOINT;
-	switch (dbgdscr & DBGDSCR_MOE_MASK) {
-	case DBGDSCR_MOE_HALT_REQ:
+	switch (dbgdscr & CORTEXAR_DBG_DSCR_MOE_MASK) {
+	case CORTEXAR_DBG_DSCR_MOE_HALT_REQUEST:
 		reason = TARGET_HALT_REQUEST;
 		break;
-	case DBGDSCR_MOE_WATCH_ASYNC:
-	case DBGDSCR_MOE_WATCH_SYNC:
+	case CORTEXAR_DBG_DSCR_MOE_ASYNC_WATCH:
+	case CORTEXAR_DBG_DSCR_MOE_SYNC_WATCH:
 		/* How do we know which watchpoint was hit? */
 		/* If there is only one set, it's that */
 		for (breakwatch_s *bw = t->bw_list; bw; bw = bw->next) {
@@ -828,46 +834,40 @@ static target_halt_reason_e cortexa_halt_poll(target_s *t, target_addr_t *watch)
 void cortexa_halt_resume(target_s *t, bool step)
 {
 	cortexa_priv_s *priv = t->priv;
-	/* Set breakpoint comarator for single stepping if needed */
+	/* Set breakpoint comparator for single stepping if needed */
 	if (step) {
 		uint32_t addr = priv->reg_cache.r[15];
 		uint32_t bas = bp_bas(addr, (priv->reg_cache.cpsr & CPSR_THUMB) ? 2 : 4);
 		DEBUG_INFO("step 0x%08" PRIx32 "  %" PRIx32 "\n", addr, bas);
 		/* Set match any breakpoint */
-		apb_write(t, DBGBVR(0), priv->reg_cache.r[15] & ~3);
-		apb_write(t, DBGBCR(0), DBGBCR_INST_MISMATCH | bas | DBGBCR_PMC_ANY | DBGBCR_EN);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BVR + 0, priv->reg_cache.r[15] & ~3);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BCR + 0, DBGBCR_INST_MISMATCH | bas | DBGBCR_PMC_ANY | DBGBCR_EN);
 	} else {
-		apb_write(t, DBGBVR(0), priv->bvr0);
-		apb_write(t, DBGBCR(0), priv->bcr0);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BVR + 0, priv->bvr0);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BCR + 0, priv->bcr0);
 	}
 
 	/* Write back register cache */
 	cortexa_regs_write_internal(t);
 
-	apb_write(t, DBGITR, MCR | ICIALLU); /* invalidate cache */
-
-	platform_timeout_s to;
-	platform_timeout_set(&to, 200);
-
-	/* Wait for instruction to complete */
-	uint32_t dbgdscr;
-	do {
-		dbgdscr = apb_read(t, DBGDSCR);
-	} while (!(dbgdscr & DBGDSCR_INSTRCOMPL) && !platform_timeout_is_expired(&to));
+	cortexar_run_insn(t, MCR | ICIALLU); /* invalidate cache */
 
 	/* Disable DBGITR.  Not sure why, but RRQ is ignored otherwise. */
+	uint32_t dbgdscr = cortex_dbg_read32(t, CORTEXAR_DBG_DSCR);
 	if (step)
 		dbgdscr |= DBGDSCR_INTDIS;
 	else
 		dbgdscr &= ~DBGDSCR_INTDIS;
-	dbgdscr &= ~DBGDSCR_ITREN;
-	apb_write(t, DBGDSCR, dbgdscr);
+	dbgdscr &= ~CORTEXAR_DBG_DSCR_ITR_ENABLE;
+	cortex_dbg_write32(t, CORTEXAR_DBG_DSCR, dbgdscr);
 
+	platform_timeout_s to;
+	platform_timeout_set(&to, 200);
 	do {
-		apb_write(t, DBGDRCR, DBGDRCR_CSE | DBGDRCR_RRQ);
-		dbgdscr = apb_read(t, DBGDSCR);
+		cortex_dbg_write32(t, CORTEXAR_DBG_DRCR, DBGDRCR_CSE | DBGDRCR_RRQ);
+		dbgdscr = cortex_dbg_read32(t, CORTEXAR_DBG_DSCR);
 		DEBUG_INFO("%s: DBGDSCR = 0x%08" PRIx32 "\n", __func__, dbgdscr);
-	} while (!(dbgdscr & DBGDSCR_RESTARTED) && !platform_timeout_is_expired(&to));
+	} while (!(dbgdscr & CORTEXAR_DBG_DSCR_RESTARTED) && !platform_timeout_is_expired(&to));
 }
 
 /* Breakpoints */
@@ -883,7 +883,7 @@ static uint32_t bp_bas(uint32_t addr, uint8_t len)
 static int cortexa_breakwatch_set(target_s *t, breakwatch_s *bw)
 {
 	cortexa_priv_s *priv = t->priv;
-	unsigned i;
+	uint32_t i;
 
 	switch (bw->type) {
 	case TARGET_BREAK_SOFT:
@@ -917,8 +917,8 @@ static int cortexa_breakwatch_set(target_s *t, breakwatch_s *bw)
 
 		uint32_t addr = va_to_pa(t, bw->addr);
 		uint32_t bcr = bp_bas(addr, bw->size) | DBGBCR_PMC_ANY | DBGBCR_EN;
-		apb_write(t, DBGBVR(i), addr & ~3);
-		apb_write(t, DBGBCR(i), bcr);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BVR + (i << 2U), addr & ~3);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BCR + (i << 2U), bcr);
 		if (i == 0) {
 			priv->bcr0 = bcr;
 			priv->bvr0 = addr & ~3;
@@ -974,10 +974,10 @@ static int cortexa_breakwatch_set(target_s *t, breakwatch_s *bw)
 				return -1;
 			}
 
-			apb_write(t, DBGWCR(i), wcr);
-			apb_write(t, DBGWVR(i), bw->addr & ~3U);
-			DEBUG_INFO("Watchpoint set WCR = 0x%08" PRIx32 ", WVR = %08" PRIx32 "\n", apb_read(t, DBGWCR(i)),
-				apb_read(t, DBGWVR(i)));
+			cortex_dbg_write32(t, CORTEXAR_DBG_WVR + (i << 2U), wcr);
+			cortex_dbg_write32(t, CORTEXAR_DBG_WCR + (i << 2U), bw->addr & ~3U);
+			DEBUG_INFO("Watchpoint set WCR = 0x%08" PRIx32 ", WVR = %08" PRIx32 "\n",
+				cortex_dbg_read32(t, CORTEXAR_DBG_WVR + (i << 2U)), cortex_dbg_read32(t, CORTEXAR_DBG_WCR + (i << 2U)));
 		}
 		return 0;
 
@@ -989,7 +989,7 @@ static int cortexa_breakwatch_set(target_s *t, breakwatch_s *bw)
 static int cortexa_breakwatch_clear(target_s *t, breakwatch_s *bw)
 {
 	cortexa_priv_s *priv = t->priv;
-	unsigned i = bw->reserved[0];
+	uint32_t i = bw->reserved[0];
 	switch (bw->type) {
 	case TARGET_BREAK_SOFT:
 		switch (bw->size) {
@@ -1004,7 +1004,7 @@ static int cortexa_breakwatch_clear(target_s *t, breakwatch_s *bw)
 		}
 	case TARGET_BREAK_HARD:
 		priv->base.breakpoints_mask &= ~(1U << i);
-		apb_write(t, DBGBCR(i), 0);
+		cortex_dbg_write32(t, CORTEXAR_DBG_BCR + (i << 2U), 0);
 		if (i == 0)
 			priv->bcr0 = 0;
 		return 0;
@@ -1012,7 +1012,7 @@ static int cortexa_breakwatch_clear(target_s *t, breakwatch_s *bw)
 	case TARGET_WATCH_READ:
 	case TARGET_WATCH_ACCESS:
 		priv->base.watchpoints_mask &= ~(1U << i);
-		apb_write(t, DBGWCR(i), 0);
+		cortex_dbg_write32(t, CORTEXAR_DBG_WCR + (i << 2U), 0);
 		return 0;
 	default:
 		return 1;

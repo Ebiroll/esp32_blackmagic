@@ -997,14 +997,14 @@ void ap_mem_access_setup(adiv5_access_port_s *ap, uint32_t addr, align_e align)
 	uint32_t csw = ap->csw | ADIV5_AP_CSW_ADDRINC_SINGLE;
 
 	switch (align) {
-	case ALIGN_BYTE:
+	case ALIGN_8BIT:
 		csw |= ADIV5_AP_CSW_SIZE_BYTE;
 		break;
-	case ALIGN_HALFWORD:
+	case ALIGN_16BIT:
 		csw |= ADIV5_AP_CSW_SIZE_HALFWORD;
 		break;
-	case ALIGN_DWORD:
-	case ALIGN_WORD:
+	case ALIGN_64BIT:
+	case ALIGN_32BIT:
 		csw |= ADIV5_AP_CSW_SIZE_WORD;
 		break;
 	}
@@ -1016,7 +1016,7 @@ void ap_mem_access_setup(adiv5_access_port_s *ap, uint32_t addr, align_e align)
 void *adiv5_unpack_data(void *const dest, const uint32_t src, const uint32_t data, const align_e align)
 {
 	switch (align) {
-	case ALIGN_BYTE: {
+	case ALIGN_8BIT: {
 		/*
 		 * Mask off the bottom 2 bits of the address to figure out which byte of data to use
 		 * then multiply that by 8 and shift the data down by the result to pick one of the 4 possible bytes
@@ -1026,7 +1026,7 @@ void *adiv5_unpack_data(void *const dest, const uint32_t src, const uint32_t dat
 		memcpy(dest, &value, sizeof(value));
 		break;
 	}
-	case ALIGN_HALFWORD: {
+	case ALIGN_16BIT: {
 		/*
 		 * Mask off the 2nd bit of the address to figure out which 16 bits of data to use
 		 * then multiply that by 8 and shift the data down by the result to pick one of the 2 possible 16-bit blocks
@@ -1036,8 +1036,8 @@ void *adiv5_unpack_data(void *const dest, const uint32_t src, const uint32_t dat
 		memcpy(dest, &value, sizeof(value));
 		break;
 	}
-	case ALIGN_DWORD:
-	case ALIGN_WORD:
+	case ALIGN_64BIT:
+	case ALIGN_32BIT:
 		/*
 		 * When using 32- or 64-bit alignment, we don't have to do anything special, just memcpy() the data to the
 		 * destination buffer (this avoids issues with unaligned writes and UB casts)
@@ -1052,7 +1052,7 @@ void *adiv5_unpack_data(void *const dest, const uint32_t src, const uint32_t dat
 const void *adiv5_pack_data(const uint32_t dest, const void *const src, uint32_t *const data, const align_e align)
 {
 	switch (align) {
-	case ALIGN_BYTE: {
+	case ALIGN_8BIT: {
 		uint8_t value;
 		/* Copy the data to pack in from the source buffer */
 		memcpy(&value, src, sizeof(value));
@@ -1060,7 +1060,7 @@ const void *adiv5_pack_data(const uint32_t dest, const void *const src, uint32_t
 		*data = (uint32_t)value << (8U * (dest & 3U));
 		break;
 	}
-	case ALIGN_HALFWORD: {
+	case ALIGN_16BIT: {
 		uint16_t value;
 		/* Copy the data to pack in from the source buffer (avoids unaligned read issues) */
 		memcpy(&value, src, sizeof(value));
@@ -1079,10 +1079,10 @@ const void *adiv5_pack_data(const uint32_t dest, const void *const src, uint32_t
 	return (const uint8_t *)src + (1 << align);
 }
 
-void advi5_mem_read_bytes(adiv5_access_port_s *ap, void *dest, uint32_t src, size_t len)
+void advi5_mem_read_bytes(adiv5_access_port_s *const ap, void *dest, uint32_t src, size_t len)
 {
 	uint32_t osrc = src;
-	const align_e align = MIN(ALIGNOF(src), ALIGNOF(len));
+	const align_e align = MIN_ALIGN(src, len);
 
 	if (len == 0)
 		return;
@@ -1144,8 +1144,8 @@ uint32_t firmware_ap_read(adiv5_access_port_s *ap, uint16_t addr)
 	return ret;
 }
 
-void adiv5_mem_write(adiv5_access_port_s *ap, uint32_t dest, const void *src, size_t len)
+void adiv5_mem_write(adiv5_access_port_s *const ap, const uint32_t dest, const void *const src, const size_t len)
 {
-	align_e align = MIN(ALIGNOF(dest), ALIGNOF(len));
+	const align_e align = MIN_ALIGN(dest, len);
 	adiv5_mem_write_sized(ap, dest, src, len, align);
 }

@@ -225,13 +225,14 @@
 #define JTAG_IDCODE_DESIGNER_JEP106_CONT_MASK   (0xfU << ADIV5_DP_DESIGNER_JEP106_CONT_OFFSET)
 #define JTAG_IDCODE_DESIGNER_JEP106_CODE_MASK   (0x7fU)
 
-
+/*
 typedef enum align {
 	ALIGN_BYTE = 0,
 	ALIGN_HALFWORD = 1,
 	ALIGN_WORD = 2,
 	ALIGN_DWORD = 3
 } align_e;
+*/
 
 typedef struct adiv5_access_port adiv5_access_port_s;
 typedef struct adiv5_debug_port adiv5_debug_port_s;

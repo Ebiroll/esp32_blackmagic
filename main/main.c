@@ -80,7 +80,6 @@ unsigned short gdb_port = 2345;
 #define EXAMPLE_WIFI_SSID "change_this"
 #define EXAMPLE_WIFI_PASS "secret"
 
-
 #define EXAMPLE_ESP_WIFI_SSID "blackmagic"
 #define EXAMPLE_WIFI_PASS "sesam1234"
 #define EXAMPLE_ESP_WIFI_PASS "sesam1234"
@@ -302,7 +301,36 @@ void old_gdb_application_thread(void *pvParameters)
 	}
 }
 
+
 static void bmp_poll_loop(void)
+{
+	SET_IDLE_STATE(false);
+	while (gdb_target_running && cur_target) {
+		gdb_poll_target();
+
+		// Check again, as `gdb_poll_target()` may
+		// alter these variables.
+		if (!gdb_target_running || !cur_target)
+			break;
+		char c = gdb_if_getchar_to(0);
+		if (c == '\x03' || c == '\x04')
+			target_halt_request(cur_target);
+		platform_pace_poll();
+#ifdef ENABLE_RTT
+		if (rtt_enabled)
+			poll_rtt(cur_target);
+#endif
+	}
+
+	SET_IDLE_STATE(true);
+	size_t size = gdb_getpacket(pbuf, GDB_PACKET_BUFFER_SIZE);
+	// If port closed and target detached, stay idle
+	if (pbuf[0] != '\x04' || cur_target)
+		SET_IDLE_STATE(false);
+	gdb_main(pbuf, GDB_PACKET_BUFFER_SIZE, size);
+}
+
+static void bad_bmp_poll_loop(void)
 {
 	SET_IDLE_STATE(false);
 	while (gdb_target_running && cur_target) {
@@ -356,6 +384,22 @@ static void bmp_poll_loop(void)
     }
 }
 
+static void main_loop(void)
+{
+     while (1) {
+		volatile exception_s e;
+		TRY_CATCH (e, EXCEPTION_ALL) {
+			bmp_poll_loop();
+		}
+		if (e.type) {
+			gdb_putpacketz("EFF");
+			target_list_free();
+			gdb_outf("Uncaught exception: %s\n", e.msg);
+			morse("TARGET LOST.", true);
+		}
+     }
+
+}
 
 
 static void gdb_application_thread(void *pvParameters)
@@ -431,7 +475,8 @@ static void gdb_application_thread(void *pvParameters)
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
         printf("accepted new gdb connection\n");
         set_gdb_socket(sock);
-        bmp_poll_loop();
+        main_loop();
+        //bmp_poll_loop();
 
         //SET_IDLE_STATE(true);
         //size_t size =  gdb_getpacket(pbuf, GDB_PACKET_BUFFER_SIZE);
@@ -465,8 +510,10 @@ void app_main()
 
 
 #ifndef AP_MODE
+    ESP_LOGI(TAG, "Normal wifi mode");
     initialise_wifi();
 #else
+    ESP_LOGI(TAG, "Soft AP mode");
     wifi_init_softap();
 #endif
 

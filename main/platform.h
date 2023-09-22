@@ -55,11 +55,16 @@
 #define TCK_PIN (10) // 
 #endif
 
-
+// Good pins for tes ESP32C3-devkit-m
 #define SWDIO_PIN  (8)
-//TMS_PIN
 #define SWCLK_PIN  (10)
-// TCK_PIN
+
+// Good pins for tes ESP32C3-devkit-c-02
+//#define SWDIO_PIN  (6)
+//TMS_PIN
+//#define SWCLK_PIN  (7)
+
+
 
 #define NRST_PORT 0
 #define NRST_PIN  (22)
@@ -69,13 +74,13 @@
 #define SWCLK_PORT  0
 #define SWDIO_PORT  0
 
-/* These are used for input JTAG on esp32
+/* These are used for input JTAG 
 2 	MTDO / GPIO15 	TDO
 3 	MTDI / GPIO12 	TDI
 4 	MTCK / GPIO13 	TCK
 5 	MTMS / GPIO14 	TMS
 */
-#define PLATFORM_IDENT "(ESP32S3)"
+#define PLATFORM_IDENT "(ESP32C3)"
 #define PLATFORM_HAS_TRACESWO 1
 #define TRACESWO_PROTOCOL  2
 
