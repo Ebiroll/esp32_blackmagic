@@ -226,3 +226,7 @@ I (540) wifi:Init max length of beacon: 752/752
 I (550) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.4.1
 I (560) blackmagic: wifi_init_softap finished. SSID:blackmagic password:sesam1234 channel:7
 ```
+
+
+# C3 schematics for test of JTAG
+![C# Schematics](c3-schematics.png)
