@@ -9,6 +9,8 @@ https://github.com/markrages/blackmagic/tree/a1d5386ce43189f0ac23300bea9b4d9f268
 # Changes
  I merged JTAG support for riscv-esp32c3 however this is not tested.
 
+
+
  If you connect an STM32 board and put it in boot mode, then you might be able to query some information 
  with uart_scan.
 
