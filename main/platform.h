@@ -84,9 +84,9 @@
 #define PLATFORM_HAS_TRACESWO 1
 #define TRACESWO_PROTOCOL  2
 
-#define TRACESWO_PIN 7
+#define TRACESWO_PIN 6
 // Workaround for driver
-#define TRACESWO_DUMMY_TX 6
+#define TRACESWO_DUMMY_TX 4
 
 
 #define gpio_set_val(port, pin, value) do {	\

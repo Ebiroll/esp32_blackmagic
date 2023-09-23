@@ -10,7 +10,7 @@ static const char *TAG = "esp32_port";
 
 
 
-int port_baudrate = 115200;
+int port_baudrate = 9600;
 uart_port_t uart_num = UART_NUM_1;                                     //uart port number
 QueueHandle_t uart_queue;
 int driver_initiated=0;
@@ -24,10 +24,12 @@ static port_err_t esp_open(struct stm_port_interface *port,
   if (driver_initiated==1) {
 	return;
   }
+
+  
   uart_config_t uart_config = {
       .baud_rate = port_baudrate,                    //baudrate
       .data_bits = UART_DATA_8_BITS,          //data bit mode
-      .parity = UART_PARITY_DISABLE,          //parity mode
+      .parity = UART_PARITY_EVEN,          //parity mode
       .stop_bits = UART_STOP_BITS_1,          //stop bit mode
       .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,  //hardware flow control(cts/rts)
       .rx_flow_ctrl_thresh = 122,             //flow control threshold
@@ -38,11 +40,24 @@ static port_err_t esp_open(struct stm_port_interface *port,
   ESP_ERROR_CHECK( uart_set_pin(uart_num, TRACESWO_DUMMY_TX, TRACESWO_PIN, -1, -1));
   ESP_ERROR_CHECK( uart_driver_install(uart_num, 512 * 2, 512 * 2, 10,  &uart_queue,0));
 
-  printf("ESP32 stm_probe pin %d baudrate %d\n",TRACESWO_PIN,port_baudrate);
+  ESP_LOGI(TAG,"ESP32 stm_probe pin %d baudrate %d\n",TRACESWO_PIN,port_baudrate);
 
   driver_initiated=1;
 }
 
+char merged_string[256];
+void send_to_uart(int argc, const char **argv) {
+	// Merge all input strings into one
+	merged_string[0] = '\0';
+	for (int i = 1; i < argc; ++i) {
+		strcat(merged_string, argv[i]);
+		if (i < argc - 1) {
+			strcat(merged_string, " ");
+		}
+	}	
+	uart_write_bytes(uart_num, (const char *) merged_string, strlen(merged_string));
+	uart_flush(uart_num);
+}
 
 static port_err_t esp_close(struct stm_port_interface *port)
 {
@@ -62,9 +77,12 @@ static port_err_t esp_read(struct stm_port_interface *port, void *buf,
 
 	uint8_t *pos = (uint8_t *)buf;
 	int r;
+	ESP_LOGI(TAG,"Reading %d",nbyte);
 
 	while (nbyte) {
-		r = uart_read_bytes(uart_num, (unsigned char *)pos, nbyte, 2000 / portTICK_PERIOD_MS);
+		r = uart_read_bytes(uart_num, (unsigned char *)pos, nbyte, 8000 / portTICK_PERIOD_MS);
+		ESP_LOGI(TAG,"Read %d %X",r,*pos);
+
 		if (r == 0)
 			return PORT_ERR_TIMEDOUT;
 		if (r < 0)
@@ -89,7 +107,7 @@ static port_err_t esp_write(struct stm_port_interface *port, void *buf,
 {	
 	const uint8_t *pos = (const uint8_t *)buf;
 	int r;
-
+	ESP_LOGI(TAG,"writing %d bytes %X",nbyte,*pos);
 
 	while (nbyte) {
 		r = uart_write_bytes(uart_num, (const char *) pos, nbyte);
@@ -99,6 +117,7 @@ static port_err_t esp_write(struct stm_port_interface *port, void *buf,
 		nbyte -= r;
 		pos += r;
 	}
+	uart_flush(uart_num);
 
 
 	return PORT_ERR_OK;
@@ -127,10 +146,10 @@ static const char *esp_get_cfg_str(struct stm_port_interface *port)
 }
 
 static struct varlen_cmd esp_cmd_get_reply[] = {
-	{0x10, 11},
-	{0x11, 17},
-	{0x12, 18},
-	{ /* sentinel */ }
+	// {0x10, 11},
+	// {0x11, 17},
+	// {0x12, 18},
+	// { /* sentinel */ }
 };
 
 struct stm_port_interface port_esp32 = {

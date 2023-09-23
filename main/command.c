@@ -84,6 +84,15 @@ static bool cmd_shutdown_bmda(target_s *t, int argc, const char **argv);
 #endif
 
 void scan_uart_boot_mode();
+extern void send_to_uart(int argc, const char **argv);
+
+static bool uart_send(target_s *t, int argc, const char **argv) {
+	send_to_uart(argc,argv);
+
+	gdb_outf("Sending: %s\n",(const char *) argv[1]);
+	platform_delay(500);
+	return true;
+}
 
 const command_s cmd_list[] = {
 	{"version", cmd_version, "Display firmware version info"},
@@ -100,6 +109,8 @@ const command_s cmd_list[] = {
 	{"connect_rst", cmd_connect_reset, "Configure connect under reset: [enable|disable]"},
 	{"reset", cmd_reset, "Pulse the nRST line - disconnects target: [PULSE_LEN, default 0ms]"},
 	{"uart_scan", scan_uart_boot_mode, "Stm32 scan of uart TRACESWO pin, target must be set to boot mode"},
+	{"uart_send", uart_send, "Send bytes on TRACESWO_DUMMY_TX pin"},
+
 	{"tdi_low_reset", cmd_tdi_low_reset,
 		"Pulse nRST with TDI set low to attempt to wake certain targets up (eg LPC82x)"},
 

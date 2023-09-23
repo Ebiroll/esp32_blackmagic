@@ -125,23 +125,23 @@ static void routeTask(void *inpar) {
   while(1) {
       //uint32_t bd=uart_baud_detect(1);
       //printf("baud %d\n",bd);
-      size = uart_read_bytes(uart_num, (unsigned char *)data, 3, 10 / portTICK_PERIOD_MS);
+      size = uart_read_bytes(uart_num, (unsigned char *)data, 3, 100 / portTICK_PERIOD_MS);
 
       // TODO, read channel or whatever is in data[0] & data[1] 
       if (size == 1) {
             //printf("%c\n",data[0]);
-            printf("1 bytes received %d\n",data[0]);
+            //printf("1 bytes received %x\n",data[0]);
       }
       if (size == 2) {
             //printf("%c%c\n",data[0],data[1]);
-            printf("2 bytes received %d\n",data[0]);
+            //printf("2 bytes received %x %x\n",data[0],data[1]);
       }
       if (size == 3) {
-            printf("%c%c%c",data[0],data[1],data[2]);
+            //printf("3 %x %x %x",data[0],data[1],data[2]);
             //printf("3\n");
       }
       data[size]=0;
-      gdb_outf("%s",data);
+      gdb_outf("%s\r\n",data);
       // Keep watchdog happy
       timg_wdtfeed_reg_t feed_me;
       timg_wdtwprotect_reg_t protect_me;

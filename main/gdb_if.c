@@ -96,6 +96,7 @@ unsigned char gdb_if_getchar(void)
 		if(gdb_if_conn <= 0) {
 			gdb_if_conn = accept(gdb_if_serv, NULL, NULL);
 			DEBUG_INFO("Got connection again\n");
+			/*
 			int retries=5;
 
 			target_addr_t watch;
@@ -104,6 +105,7 @@ unsigned char gdb_if_getchar(void)
                 reason = target_halt_poll(cur_target, &watch);
             }
             gdb_poll_target();
+			*/
 		}
 		i = recv(gdb_if_conn, (void*)&ret, 1, 0);
 		if(i <= 0) {

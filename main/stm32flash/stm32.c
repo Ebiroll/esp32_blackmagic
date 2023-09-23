@@ -454,9 +454,13 @@ stm32_t *stm32_init(struct stm_port_interface *port, const char init)
 	memset(stm->cmd, STM32_CMD_ERR, sizeof(stm32_cmd_t));
 	stm->port = port;
 
-	if ((port->flags & PORT_CMD_INIT) && init)
-		if (stm32_send_init_seq(stm) != STM32_ERR_OK)
-			return NULL;
+	if ((port->flags & PORT_CMD_INIT) && init) {
+		printf("Send init\r\n");
+		if (stm32_send_init_seq(stm) != STM32_ERR_OK) {
+			
+		}
+			//return NULL;
+	}
 
 	/* get the version and read protection status  */
 	if (stm32_send_command(stm, STM32_CMD_GVR) != STM32_ERR_OK) {
@@ -1264,6 +1268,7 @@ void scan_uart_boot_mode()
  {
 	//port_options ops;
 	port=set_stm_port();
+	printf("Set to %x %s",port,port->name);
 	int ret = port->open(port, NULL);
 	stm = stm32_init(port, init_flag);
 	if (!stm)
