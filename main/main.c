@@ -81,7 +81,6 @@ unsigned short gdb_port = 2345;
 #define EXAMPLE_WIFI_PASS "secret"
 
 #define EXAMPLE_ESP_WIFI_SSID "blackmagic"
-#define EXAMPLE_WIFI_PASS "sesam1234"
 #define EXAMPLE_ESP_WIFI_PASS "sesam1234"
 #define EXAMPLE_ESP_WIFI_CHANNEL  7
 #define  EXAMPLE_MAX_STA_CONN 3
