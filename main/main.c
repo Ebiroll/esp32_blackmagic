@@ -30,7 +30,6 @@
 #include "exception.h"
 #include "gdb_packet.h"
 #include "morse.h"
-#define BIT0
 #include "libopencm3/cm3/common.h"
 
 
@@ -77,17 +76,32 @@ unsigned short gdb_port = 2345;
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
 
-#define EXAMPLE_WIFI_SSID "change_this"
-#define EXAMPLE_WIFI_PASS "secret"
+#define EXAMPLE_WIFI_SSID "MYSSID"
+#define EXAMPLE_WIFI_PASS "mypassword"
 
 #define EXAMPLE_ESP_WIFI_SSID "blackmagic"
-#define EXAMPLE_WIFI_PASS "sesam1234"
 #define EXAMPLE_ESP_WIFI_PASS "sesam1234"
 #define EXAMPLE_ESP_WIFI_CHANNEL  7
 #define  EXAMPLE_MAX_STA_CONN 3
 
-
 #define AP_MODE 1
+
+#ifndef AP_MODE
+#define USE_DHCP 1
+#ifndef USE_DHCP
+esp_netif_ip_info_t ip_info = {
+    .ip = {
+        .addr = ESP_IP4TOADDR(192, 168, 1, 22),
+    },
+    .gw = {
+        .addr = ESP_IP4TOADDR(192, 168, 1, 1),
+    },
+    .netmask = {
+        .addr = ESP_IP4TOADDR(255, 255, 255, 0),
+    },
+};
+#endif
+#endif
 
 /* This has to be aligned so the remote protocol can re-use it without causing Problems */
 static char pbuf[GDB_PACKET_BUFFER_SIZE + 1U] __attribute__((aligned(8)));
@@ -127,7 +141,7 @@ static int already_connected=0;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static esp_err_t event_handler(void* arg, esp_event_base_t event_base,
+static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -168,6 +182,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                  MAC2STR(event->mac), event->aid);
     }
 }
+
+#ifndef AP_MODE
 static void initialise_wifi(void)
 {
     wifi_event_group = xEventGroupCreate();
@@ -175,9 +191,18 @@ static void initialise_wifi(void)
     ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+
+#ifdef USE_DHCP
+    ESP_LOGI(TAG, "Getting IP addresses from DHCP");
+#else
+    ESP_LOGI(TAG, "Using hard-coded IP info");
+    esp_netif_dhcpc_stop(netif);
+    esp_netif_set_ip_info(netif, &ip_info);
+#endif
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    cfg.nvs_enable = true;
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     esp_event_handler_instance_t instance_any_id;
@@ -202,6 +227,7 @@ static void initialise_wifi(void)
              * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
              * WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK standards.
              */
+            .channel = 0,
             .threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD,
             .sae_pwe_h2e = WPA3_SAE_PWE_UNSPECIFIED,
             .sae_h2e_identifier = EXAMPLE_H2E_IDENTIFIER,
@@ -214,10 +240,8 @@ static void initialise_wifi(void)
     ESP_ERROR_CHECK(esp_wifi_start() );
 
     ESP_LOGI(TAG, "wifi_init_sta finished.");
-
 }
-
-
+#else
 void wifi_init_softap(void)
 {
 
@@ -265,7 +289,7 @@ void wifi_init_softap(void)
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
              EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
 }
-
+#endif
 
 void old_gdb_application_thread(void *pvParameters)
 {
@@ -506,8 +530,6 @@ void app_main()
     }
 
     ESP_ERROR_CHECK( ret );
-
-
 
 #ifndef AP_MODE
     ESP_LOGI(TAG, "Normal wifi mode");

@@ -20,10 +20,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h> // Required for usleep function
 
 #include "stm32.h"
 #include "stm_port.h"
 #include "gdb_packet.h"
+#include "time.h"
 //#include "utils.h"
 
 
