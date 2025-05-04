@@ -20,7 +20,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h> // Required for usleep function
+#include <unistd.h>
 
 #include "stm32.h"
 #include "stm_port.h"

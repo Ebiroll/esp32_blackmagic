@@ -43,7 +43,6 @@ static port_err_t esp_open(struct stm_port_interface *port,
   ESP_LOGI(TAG,"ESP32 stm_probe pin %d baudrate %d\n",TRACESWO_PIN,port_baudrate);
 
   driver_initiated=1;
-
   return PORT_ERR_OK;
 }
 
